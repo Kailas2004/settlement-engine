@@ -1,0 +1,22 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+
+# IntelliJ
+.idea/
+*.iml
+
+# Mac
+.DS_Store
+
+# Logs
+*.log
+
+# Env files
+application-local.yml
+
+data/
