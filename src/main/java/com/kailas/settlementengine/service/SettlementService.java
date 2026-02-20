@@ -5,6 +5,7 @@ import com.kailas.settlementengine.entity.Transaction;
 import com.kailas.settlementengine.entity.TransactionStatus;
 import com.kailas.settlementengine.repository.SettlementLogRepository;
 import com.kailas.settlementengine.repository.TransactionRepository;
+import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,7 +27,35 @@ public class SettlementService {
         this.settlementLogRepository = settlementLogRepository;
     }
 
-    @Transactional  // REQUIRED for JPQL update query
+    /**
+     * Recovery logic:
+     * If the application crashes while a transaction is in PROCESSING,
+     * we revert it back to CAPTURED so it can be retried.
+     */
+    @PostConstruct
+    @Transactional
+    public void recoverStuckTransactions() {
+
+        List<Transaction> processingTransactions =
+                transactionRepository.findByStatus(TransactionStatus.PROCESSING);
+
+        for (Transaction transaction : processingTransactions) {
+            transaction.setStatus(TransactionStatus.CAPTURED);
+            transactionRepository.save(transaction);
+        }
+
+        if (!processingTransactions.isEmpty()) {
+            System.out.println("Recovered "
+                    + processingTransactions.size()
+                    + " stuck PROCESSING transactions.");
+        }
+    }
+
+    /**
+     * Main settlement processor.
+     * Runs via Quartz scheduler or manual trigger.
+     */
+    @Transactional
     public void processSettlements() {
 
         System.out.println("Processing settlements on thread: "
@@ -39,11 +68,11 @@ public class SettlementService {
 
         for (Transaction transaction : transactions) {
 
-            //Atomic claim (prevents double processing)
+            // Atomic claim to prevent double-processing
             int updatedRows = transactionRepository.claimTransaction(transaction.getId());
 
             if (updatedRows == 0) {
-                // Someone else already claimed it
+                // Already claimed by another thread/instance
                 continue;
             }
 
@@ -62,7 +91,9 @@ public class SettlementService {
                 log.setResult("SETTLED");
                 log.setMessage("Settlement successful");
 
-                System.out.println("Transaction " + transaction.getId() + " SETTLED");
+                System.out.println("Transaction "
+                        + transaction.getId()
+                        + " SETTLED");
 
             } else {
 
@@ -79,6 +110,7 @@ public class SettlementService {
                 if (transaction.getRetryCount() >= transaction.getMaxRetries()) {
                     transaction.setStatus(TransactionStatus.FAILED);
                 } else {
+                    // Reset to CAPTURED for next retry cycle
                     transaction.setStatus(TransactionStatus.CAPTURED);
                 }
             }

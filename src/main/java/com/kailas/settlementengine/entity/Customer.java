@@ -4,14 +4,23 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "customers")
+@Table(
+        name = "customers",
+        uniqueConstraints = {
+                @UniqueConstraint(columnNames = "email")
+        }
+)
 public class Customer {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
     private String name;
+
+    @Column(nullable = false, unique = true)
     private String email;
+
     private LocalDateTime createdAt;
 
     @PrePersist

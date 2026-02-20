@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Settlement Engine Admin</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="container">
+
+    <div class="sidebar">
+        <h2>Settlement Engine</h2>
+        <button onclick="showSection('dashboard')">Dashboard</button>
+        <button onclick="showSection('customers')">Customers</button>
+        <button onclick="showSection('merchants')">Merchants</button>
+        <button onclick="showSection('transactions')">Transactions</button>
+        <button onclick="showSection('logs')">Settlement Logs</button>
+        <button onclick="triggerSettlement()">Trigger Settlement</button>
+    </div>
+
+    <div class="main">
+
+        <!-- DASHBOARD -->
+        <div id="dashboard" class="section">
+            <h1>System Overview</h1>
+            <p class="subtitle">Settlement job runs automatically every 30 seconds.</p>
+            <p id="lastUpdated"></p>
+
+            <div class="cards">
+                <div class="card" id="totalCard"></div>
+                <div class="card" id="capturedCard"></div>
+                <div class="card" id="processingCard"></div>
+                <div class="card" id="settledCard"></div>
+                <div class="card" id="failedCard"></div>
+                <div class="card" id="retryCard"></div>
+            </div>
+
+            <div id="settlementActivity" class="activity-box"></div>
+        </div>
+
+        <!-- CUSTOMERS -->
+        <div id="customers" class="section hidden">
+            <h1>Customers</h1>
+
+            <div class="form">
+                <input type="text" id="customerName" placeholder="Name">
+                <input type="email" id="customerEmail" placeholder="Email">
+                <button onclick="createCustomer()">Create</button>
+            </div>
+
+            <table id="customersTable"></table>
+        </div>
+
+        <!-- MERCHANTS -->
+        <div id="merchants" class="section hidden">
+            <h1>Merchants</h1>
+
+            <div class="form">
+                <input type="text" id="merchantName" placeholder="Name">
+                <input type="text" id="merchantBank" placeholder="Bank Account">
+                <input type="text" id="merchantCycle" placeholder="Settlement Cycle (DAILY)">
+                <button onclick="createMerchant()">Create</button>
+            </div>
+
+            <table id="merchantsTable"></table>
+        </div>
+
+        <!-- TRANSACTIONS -->
+        <div id="transactions" class="section hidden">
+            <h1>Transactions</h1>
+
+            <div class="form">
+                <input type="number" id="customerId" placeholder="Customer ID">
+                <input type="number" id="merchantId" placeholder="Merchant ID">
+                <input type="number" id="amount" placeholder="Amount">
+                <button onclick="createTransaction()">Create</button>
+            </div>
+
+            <table id="transactionsTable"></table>
+        </div>
+
+        <!-- LOGS -->
+        <div id="logs" class="section hidden">
+            <h1>Settlement Logs</h1>
+            <table id="logsTable"></table>
+        </div>
+
+    </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

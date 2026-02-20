@@ -4,15 +4,24 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "merchants")
+@Table(
+        name = "merchants",
+        uniqueConstraints = {
+                @UniqueConstraint(columnNames = {"name", "bankAccount"})
+        }
+)
 public class Merchant {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
     private String name;
+
     private String bankAccount;
+
     private String settlementCycle;
+
     private LocalDateTime createdAt;
 
     @PrePersist
