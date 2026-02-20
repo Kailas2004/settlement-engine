@@ -11,25 +11,22 @@ public class Transaction {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
     private BigDecimal amount;
-
     private LocalDateTime createdAt;
 
     @Enumerated(EnumType.STRING)
     private TransactionStatus status;
-
     private int retryCount;
-
     private int maxRetries;
-
     private LocalDateTime settledAt;
 
-    @ManyToOne
+    //Changed to LAZY to fix N+1 problem
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "merchant_id")
     private Merchant merchant;
 
-    @ManyToOne
+    //Changed to LAZY to fix N+1 problem
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "customer_id")
     private Customer customer;
 
@@ -39,8 +36,6 @@ public class Transaction {
         this.retryCount = 0;
         this.maxRetries = 3;
     }
-
-    // ===== GETTERS & SETTERS =====
 
     public Long getId() { return id; }
 

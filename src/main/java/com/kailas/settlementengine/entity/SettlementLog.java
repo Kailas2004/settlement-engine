@@ -11,13 +11,9 @@ public class SettlementLog {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
     private Integer attemptNumber;
-
     private String message;
-
     private String result;
-
     private LocalDateTime timestamp;
 
     @ManyToOne
@@ -36,8 +32,6 @@ public class SettlementLog {
         this.timestamp = timestamp;
         this.transaction = transaction;
     }
-
-    // ===== GETTERS =====
 
     public Long getId() {
         return id;
@@ -62,8 +56,6 @@ public class SettlementLog {
     public Transaction getTransaction() {
         return transaction;
     }
-
-    // ===== SETTERS =====
 
     public void setAttemptNumber(Integer attemptNumber) {
         this.attemptNumber = attemptNumber;

@@ -10,21 +10,15 @@ public class Merchant {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
     private String name;
-
     private String bankAccount;
-
-    private String settlementCycle; // DAILY or WEEKLY
-
+    private String settlementCycle;
     private LocalDateTime createdAt;
 
     @PrePersist
     public void prePersist() {
         this.createdAt = LocalDateTime.now();
     }
-
-    // Getters and Setters
 
     public Long getId() {
         return id;

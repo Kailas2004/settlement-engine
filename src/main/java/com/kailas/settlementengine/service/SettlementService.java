@@ -6,6 +6,7 @@ import com.kailas.settlementengine.entity.TransactionStatus;
 import com.kailas.settlementengine.repository.SettlementLogRepository;
 import com.kailas.settlementengine.repository.TransactionRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -25,6 +26,7 @@ public class SettlementService {
         this.settlementLogRepository = settlementLogRepository;
     }
 
+    @Transactional  // REQUIRED for JPQL update query
     public void processSettlements() {
 
         System.out.println("Processing settlements on thread: "
@@ -33,16 +35,16 @@ public class SettlementService {
         List<Transaction> transactions =
                 transactionRepository.findByStatus(TransactionStatus.CAPTURED);
 
-        System.out.println("Processing " + transactions.size() + " transactions");
+        System.out.println("Found " + transactions.size() + " CAPTURED transactions");
 
         for (Transaction transaction : transactions) {
 
-            try {
-                // ⏱️ Artificial 10 second delay
-                Thread.sleep(10000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("Thread interrupted", e);
+            //Atomic claim (prevents double processing)
+            int updatedRows = transactionRepository.claimTransaction(transaction.getId());
+
+            if (updatedRows == 0) {
+                // Someone else already claimed it
+                continue;
             }
 
             boolean success = random.nextBoolean();
@@ -76,6 +78,8 @@ public class SettlementService {
 
                 if (transaction.getRetryCount() >= transaction.getMaxRetries()) {
                     transaction.setStatus(TransactionStatus.FAILED);
+                } else {
+                    transaction.setStatus(TransactionStatus.CAPTURED);
                 }
             }
 

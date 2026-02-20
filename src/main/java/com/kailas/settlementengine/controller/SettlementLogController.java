@@ -9,7 +9,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/logs")
 public class SettlementLogController {
-
     private final SettlementLogRepository repository;
 
     public SettlementLogController(SettlementLogRepository repository) {

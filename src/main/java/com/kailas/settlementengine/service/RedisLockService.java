@@ -16,12 +16,9 @@ public class RedisLockService {
     }
 
     public String acquireLock(String key, long timeoutSeconds) {
-
         String lockId = UUID.randomUUID().toString();
-
         Boolean success = redisTemplate.opsForValue()
                 .setIfAbsent(key, lockId, Duration.ofSeconds(timeoutSeconds));
-
         if (Boolean.TRUE.equals(success)) {
             System.out.println("Lock acquired by instance: " + lockId);
             return lockId;
@@ -31,7 +28,6 @@ public class RedisLockService {
     }
 
     public void releaseLock(String key, String lockId) {
-
         String currentLockId = redisTemplate.opsForValue().get(key);
 
         if (lockId != null && lockId.equals(currentLockId)) {

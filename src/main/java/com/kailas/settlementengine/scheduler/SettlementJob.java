@@ -8,7 +8,6 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class SettlementJob implements Job {
-
     private final SettlementService settlementService;
     private final RedisLockService redisLockService;
 
@@ -20,16 +19,12 @@ public class SettlementJob implements Job {
 
     @Override
     public void execute(JobExecutionContext context) {
-
         String lockKey = "settlement-lock";
-
         String lockId = redisLockService.acquireLock(lockKey, 25);
-
         if (lockId == null) {
             System.out.println("Another instance is running settlements. Skipping...");
             return;
         }
-
         try {
             System.out.println("Settlement job triggered...");
             settlementService.processSettlements();

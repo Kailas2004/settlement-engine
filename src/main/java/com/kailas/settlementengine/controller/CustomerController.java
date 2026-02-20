@@ -9,7 +9,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/customers")
 public class CustomerController {
-
     private final CustomerRepository customerRepository;
 
     public CustomerController(CustomerRepository customerRepository) {

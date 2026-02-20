@@ -9,7 +9,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/merchants")
 public class MerchantController {
-
     private final MerchantRepository merchantRepository;
 
     public MerchantController(MerchantRepository merchantRepository) {

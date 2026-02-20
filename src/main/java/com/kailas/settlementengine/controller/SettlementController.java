@@ -6,7 +6,6 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/settlement")
 public class SettlementController {
-
     private final SettlementService settlementService;
 
     public SettlementController(SettlementService settlementService) {

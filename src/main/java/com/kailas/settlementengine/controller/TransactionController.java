@@ -14,7 +14,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/transactions")
 public class TransactionController {
-
     private final TransactionRepository transactionRepository;
     private final CustomerRepository customerRepository;
     private final MerchantRepository merchantRepository;
@@ -31,7 +30,6 @@ public class TransactionController {
     public Transaction createTransaction(@RequestParam Long customerId,
                                          @RequestParam Long merchantId,
                                          @RequestParam BigDecimal amount) {
-
         Customer customer = customerRepository.findById(customerId)
                 .orElseThrow(() -> new RuntimeException("Customer not found"));
 
