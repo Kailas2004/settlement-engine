@@ -85,27 +85,19 @@ scripts/
 
 ### Option A: Docker Compose
 
-This repo's `Dockerfile` expects a built jar at `target/settlement-engine-0.0.1-SNAPSHOT.jar`.
-
-1. Build:
-
-```bash
-./mvnw clean package -DskipTests
-```
-
-2. Start stack:
+1. Start stack:
 
 ```bash
 docker compose up --build
 ```
 
-3. Open:
+2. Open:
 
 ```text
 http://localhost:8080
 ```
 
-4. Stop:
+3. Stop:
 
 ```bash
 docker compose down
@@ -134,6 +126,32 @@ SPRING_DATA_REDIS_PORT=6379 \
 ./mvnw spring-boot:run
 ```
 
+### Option D: Railway (Production)
+
+This project is deployed successfully on Railway:
+
+- Live URL: `https://settlement-engine-production.up.railway.app`
+
+Required services:
+
+- PostgreSQL
+- Redis
+
+Required service variables on the app service:
+
+- `SPRING_DATASOURCE_URL`
+- `SPRING_DATASOURCE_USERNAME`
+- `SPRING_DATASOURCE_PASSWORD`
+- `SPRING_DATA_REDIS_HOST`
+- `SPRING_DATA_REDIS_PORT`
+- `SPRING_DATA_REDIS_USERNAME`
+- `SPRING_DATA_REDIS_PASSWORD`
+
+Notes:
+
+- The Dockerfile uses a multi-stage build, so Railway does not need a prebuilt local jar.
+- Railway injects `PORT`; app already supports it with `server.port=${PORT:8080}`.
+
 ## Configuration
 
 Use environment variables to override `application.properties`.
@@ -147,6 +165,9 @@ Use environment variables to override `application.properties`.
 | `SPRING_DATASOURCE_PASSWORD` | Database password |
 | `SPRING_DATA_REDIS_HOST` | Redis host |
 | `SPRING_DATA_REDIS_PORT` | Redis port |
+| `SPRING_DATA_REDIS_USERNAME` | Redis username (if required) |
+| `SPRING_DATA_REDIS_PASSWORD` | Redis password (if required) |
+| `PORT` | Runtime port (Railway provides this automatically) |
 
 ### Settlement Outcome
 
@@ -314,8 +335,18 @@ Increase:
 Run on a different port:
 
 ```bash
-SERVER_PORT=18080 ./mvnw spring-boot:run
+PORT=18080 ./mvnw spring-boot:run
 ```
+
+### Railway service shows `CRASHED` after deploy
+
+Most common cause: missing datasource/redis variables on the app service.
+
+Verify:
+
+- `SPRING_DATASOURCE_*` points to Railway Postgres service values
+- `SPRING_DATA_REDIS_*` points to Railway Redis service values
+- logs no longer show `Connection refused` to `localhost:5432`
 
 ## Current Status
 
