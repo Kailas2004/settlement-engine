@@ -37,7 +37,7 @@ public class SettlementExecutionService {
         monitoringService.recordLockAcquired(lockId, triggerSource);
 
         try {
-            long processedCount = settlementService.processSettlements();
+            long processedCount = settlementService.processSettlements(triggerSource);
             monitoringService.recordLastRun(processedCount, triggerSource);
             return new SettlementRunResult(true, processedCount);
         } finally {

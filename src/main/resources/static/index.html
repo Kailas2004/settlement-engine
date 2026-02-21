@@ -14,6 +14,7 @@
         <button onclick="showSection('customers')">Customers</button>
         <button onclick="showSection('merchants')">Merchants</button>
         <button onclick="showSection('transactions')">Transactions</button>
+        <button onclick="showSection('reconciliation')">Reconciliation</button>
         <button onclick="showSection('logs')">Settlement Logs</button>
         <button id="triggerSettlementBtn" onclick="triggerSettlement()">Trigger Settlement</button>
     </div>
@@ -32,6 +33,7 @@
                 <div class="card" id="processingCard"></div>
                 <div class="card" id="settledCard"></div>
                 <div class="card" id="failedCard"></div>
+                <div class="card" id="exceptionCard"></div>
                 <div class="card" id="retryCard"></div>
             </div>
 
@@ -77,6 +79,17 @@
             </div>
 
             <table id="transactionsTable"></table>
+        </div>
+
+        <!-- RECONCILIATION -->
+        <div id="reconciliation" class="section hidden">
+            <h1>Reconciliation & Exceptions</h1>
+
+            <div class="form">
+                <button onclick="runReconciliation()">Run Reconciliation</button>
+            </div>
+
+            <table id="exceptionsTable"></table>
         </div>
 
         <!-- LOGS -->

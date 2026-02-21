@@ -1,5 +1,6 @@
 package com.kailas.settlementengine.service;
 
+import com.kailas.settlementengine.entity.ReconciliationStatus;
 import com.kailas.settlementengine.entity.TransactionStatus;
 import com.kailas.settlementengine.repository.TransactionRepository;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,9 @@ public class SettlementMonitoringService {
         long processing = transactionRepository.countByStatus(TransactionStatus.PROCESSING);
         long settled = transactionRepository.countByStatus(TransactionStatus.SETTLED);
         long failed = transactionRepository.countByStatus(TransactionStatus.FAILED);
+        long exceptionQueued = transactionRepository.countByReconciliationStatus(
+                ReconciliationStatus.EXCEPTION_QUEUED
+        );
 
         Double avgRetry = transactionRepository.findAverageRetryCount();
         if (avgRetry == null) avgRetry = 0.0;
@@ -52,6 +56,7 @@ public class SettlementMonitoringService {
         stats.put("processing", processing);
         stats.put("settled", settled);
         stats.put("failed", failed);
+        stats.put("exceptionQueued", exceptionQueued);
         stats.put("averageRetryCount", avgRetry);
 
         // ✅ Lock status

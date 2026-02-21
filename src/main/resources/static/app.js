@@ -56,9 +56,32 @@ function parseServerDateTime(value) {
     return Date.parse(normalized);
 }
 
+async function readErrorMessage(response) {
+    try {
+        const body = await response.text();
+        if (!body) {
+            return `HTTP ${response.status}`;
+        }
+
+        try {
+            const parsed = JSON.parse(body);
+            if (parsed && parsed.message) {
+                return `HTTP ${response.status}: ${parsed.message}`;
+            }
+        } catch (_) {
+            // keep raw body fallback
+        }
+
+        return `HTTP ${response.status}: ${body}`;
+    } catch (_) {
+        return `HTTP ${response.status}`;
+    }
+}
+
 async function refreshData() {
     await loadStats();
     await loadTransactions();
+    await loadExceptionQueue();
     await loadLogs();
     await loadCustomers();
     await loadMerchants();
@@ -83,6 +106,7 @@ async function loadStats() {
     processingCard.innerHTML = `<h3>Processing</h3><p>${s.processing}</p>`;
     settledCard.innerHTML = `<h3>Settled</h3><p>${s.settled}</p>`;
     failedCard.innerHTML = `<h3>Failed</h3><p>${s.failed}</p>`;
+    exceptionCard.innerHTML = `<h3>Exceptions</h3><p>${s.exceptionQueued || 0}</p>`;
     retryCard.innerHTML = `<h3>Avg Retry</h3><p>${Number(s.averageRetryCount).toFixed(2)}</p>`;
 
     updateAdvancedStats(s);
@@ -306,6 +330,95 @@ async function loadTransactions() {
     });
 
     transactionsTable.innerHTML = html;
+}
+
+/* ================= RECONCILIATION ================= */
+
+async function runReconciliation() {
+    const res = await fetch("/api/reconciliation/run", { method: "POST" });
+    if (!res.ok) {
+        const err = await readErrorMessage(res);
+        alert("Failed to run reconciliation:\n" + err);
+        return;
+    }
+
+    const data = await res.json();
+    alert(`Reconciliation completed. Updated ${data.updatedTransactions || 0} transaction(s).`);
+    await refreshData();
+}
+
+async function retryException(transactionId) {
+    const res = await fetch(`/api/reconciliation/exceptions/${transactionId}/retry`, {
+        method: "POST"
+    });
+
+    if (!res.ok) {
+        const err = await res.text();
+        alert("Retry failed:\n" + err);
+        return;
+    }
+
+    await refreshData();
+}
+
+async function resolveException(transactionId) {
+    const note = prompt("Resolution note (optional):", "");
+    if (note === null) return;
+
+    const res = await fetch(`/api/reconciliation/exceptions/${transactionId}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note })
+    });
+
+    if (!res.ok) {
+        const err = await res.text();
+        alert("Resolve failed:\n" + err);
+        return;
+    }
+
+    await refreshData();
+}
+
+async function loadExceptionQueue() {
+    const res = await fetch("/api/reconciliation/exceptions");
+    if (!res.ok) {
+        console.error("Failed to load exception queue:", await readErrorMessage(res));
+        return;
+    }
+
+    const data = await res.json();
+    const table = document.getElementById("exceptionsTable");
+    if (!table) return;
+
+    let html = `<tr>
+        <th>Transaction</th><th>Amount</th><th>Status</th>
+        <th>Retry</th><th>Reason</th><th>Updated</th><th>Actions</th>
+    </tr>`;
+
+    if (data.length === 0) {
+        html += `<tr><td colspan="7">No exceptions in queue.</td></tr>`;
+        table.innerHTML = html;
+        return;
+    }
+
+    data.forEach(item => {
+        const reason = item.exceptionReason || "-";
+        html += `<tr>
+            <td>${item.transactionId}</td>
+            <td>${item.amount}</td>
+            <td class="status-${item.status.toLowerCase()}">${item.status}</td>
+            <td>${item.retryCount} / ${item.maxRetries}</td>
+            <td>${reason}</td>
+            <td>${item.reconciliationUpdatedAt || "-"}</td>
+            <td>
+                <button onclick="retryException(${item.transactionId})">Retry</button>
+                <button onclick="resolveException(${item.transactionId})">Resolve</button>
+            </td>
+        </tr>`;
+    });
+
+    table.innerHTML = html;
 }
 
 /* ================= LOGS ================= */

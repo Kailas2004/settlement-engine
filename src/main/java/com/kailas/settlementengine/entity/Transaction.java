@@ -16,9 +16,13 @@ public class Transaction {
 
     @Enumerated(EnumType.STRING)
     private TransactionStatus status;
+    @Enumerated(EnumType.STRING)
+    private ReconciliationStatus reconciliationStatus;
     private int retryCount;
     private int maxRetries;
     private LocalDateTime settledAt;
+    private LocalDateTime reconciliationUpdatedAt;
+    private String exceptionReason;
 
     //Changed to LAZY to fix N+1 problem
     @ManyToOne(fetch = FetchType.LAZY)
@@ -33,8 +37,10 @@ public class Transaction {
     public Transaction() {
         this.createdAt = LocalDateTime.now();
         this.status = TransactionStatus.CAPTURED;
+        this.reconciliationStatus = ReconciliationStatus.PENDING;
         this.retryCount = 0;
         this.maxRetries = 3;
+        this.reconciliationUpdatedAt = LocalDateTime.now();
     }
 
     public Long getId() { return id; }
@@ -47,6 +53,11 @@ public class Transaction {
     public TransactionStatus getStatus() { return status; }
     public void setStatus(TransactionStatus status) { this.status = status; }
 
+    public ReconciliationStatus getReconciliationStatus() { return reconciliationStatus; }
+    public void setReconciliationStatus(ReconciliationStatus reconciliationStatus) {
+        this.reconciliationStatus = reconciliationStatus;
+    }
+
     public int getRetryCount() { return retryCount; }
     public void setRetryCount(int retryCount) { this.retryCount = retryCount; }
 
@@ -55,6 +66,14 @@ public class Transaction {
 
     public LocalDateTime getSettledAt() { return settledAt; }
     public void setSettledAt(LocalDateTime settledAt) { this.settledAt = settledAt; }
+
+    public LocalDateTime getReconciliationUpdatedAt() { return reconciliationUpdatedAt; }
+    public void setReconciliationUpdatedAt(LocalDateTime reconciliationUpdatedAt) {
+        this.reconciliationUpdatedAt = reconciliationUpdatedAt;
+    }
+
+    public String getExceptionReason() { return exceptionReason; }
+    public void setExceptionReason(String exceptionReason) { this.exceptionReason = exceptionReason; }
 
     public Merchant getMerchant() { return merchant; }
     public void setMerchant(Merchant merchant) { this.merchant = merchant; }
