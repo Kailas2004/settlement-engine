@@ -4,6 +4,7 @@ import com.kailas.settlementengine.entity.TransactionStatus;
 import com.kailas.settlementengine.repository.TransactionRepository;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -11,9 +12,17 @@ import java.util.Map;
 public class SettlementMonitoringService {
 
     private final TransactionRepository transactionRepository;
+    private final RedisLockService redisLockService;
 
-    public SettlementMonitoringService(TransactionRepository transactionRepository) {
+    private LocalDateTime lastRunTime;
+    private long lastProcessedCount;
+
+    private static final String LOCK_KEY = "settlement-lock";
+
+    public SettlementMonitoringService(TransactionRepository transactionRepository,
+                                       RedisLockService redisLockService) {
         this.transactionRepository = transactionRepository;
+        this.redisLockService = redisLockService;
     }
 
     public Map<String, Object> getStats() {
@@ -37,6 +46,20 @@ public class SettlementMonitoringService {
         stats.put("failed", failed);
         stats.put("averageRetryCount", avgRetry);
 
+        // ✅ Lock status
+        stats.put("lockHeld", redisLockService.isLockHeld(LOCK_KEY));
+        stats.put("lockHolder", redisLockService.getCurrentLockHolder(LOCK_KEY));
+
+        // ✅ Last run info
+        stats.put("lastRunTime", lastRunTime);
+        stats.put("lastProcessedCount", lastProcessedCount);
+
         return stats;
+    }
+
+    // Called by SettlementJob
+    public void recordLastRun(long processedCount) {
+        this.lastRunTime = LocalDateTime.now();
+        this.lastProcessedCount = processedCount;
     }
 }

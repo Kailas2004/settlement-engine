@@ -10,13 +10,13 @@ function startAutoRefresh() {
     autoRefreshInterval = setInterval(refreshData, 10000);
 }
 
-function refreshData() {
-    loadStats();
-    loadTransactions();
-    loadLogs();
-    loadCustomers();
-    loadMerchants();
-    updateSettlementActivity();
+async function refreshData() {
+    await loadStats();
+    await loadTransactions();
+    await loadLogs();
+    await loadCustomers();
+    await loadMerchants();
+    await updateSettlementActivity();
 
     const lastUpdated = document.getElementById("lastUpdated");
     if (lastUpdated) {
@@ -38,28 +38,56 @@ async function loadStats() {
     processingCard.innerHTML = `<h3>Processing</h3><p>${s.processing}</p>`;
     settledCard.innerHTML = `<h3>Settled</h3><p>${s.settled}</p>`;
     failedCard.innerHTML = `<h3>Failed</h3><p>${s.failed}</p>`;
-    retryCard.innerHTML = `<h3>Avg Retry</h3><p>${s.averageRetryCount.toFixed(2)}</p>`;
+    retryCard.innerHTML = `<h3>Avg Retry</h3><p>${Number(s.averageRetryCount).toFixed(2)}</p>`;
+
+    updateAdvancedStats(s);
 }
 
-async function updateSettlementActivity() {
-    const res = await fetch("/api/settlements/stats");
-    if (!res.ok) return;
-
-    const s = await res.json();
+function updateAdvancedStats(stats) {
     const div = document.getElementById("settlementActivity");
     if (!div) return;
 
-    if (s.processing > 0) {
-        div.innerHTML = `
-            <div style="padding:12px;background:#fff3cd;color:#856404;border-radius:8px;">
-                ⏳ Settlement running — ${s.processing} processing
+    let html = "";
+
+    // Lock status
+    if (stats.lockHeld) {
+        html += `
+            <div style="padding:10px;margin-bottom:8px;background:#fff3cd;color:#856404;border-radius:8px;">
+                🔒 Redis Lock Active
+                <br>
+                <small>Holder: ${stats.lockHolder || "Unknown"}</small>
             </div>`;
     } else {
-        div.innerHTML = `
-            <div style="padding:12px;background:#e6fffa;color:#065f46;border-radius:8px;">
-                ✅ No active settlement running
+        html += `
+            <div style="padding:10px;margin-bottom:8px;background:#e6fffa;color:#065f46;border-radius:8px;">
+                🔓 No Lock Held
             </div>`;
     }
+
+    // Processing state
+    if (stats.processing > 0) {
+        html += `
+            <div style="padding:10px;margin-bottom:8px;background:#fff3cd;color:#856404;border-radius:8px;">
+                ⏳ Settlement Running — ${stats.processing} processing
+            </div>`;
+    } else {
+        html += `
+            <div style="padding:10px;margin-bottom:8px;background:#e6fffa;color:#065f46;border-radius:8px;">
+                ✅ No Active Settlement
+            </div>`;
+    }
+
+    // Last run info
+    if (stats.lastRunTime) {
+        html += `
+            <div style="padding:10px;background:#f0f9ff;color:#1e3a8a;border-radius:8px;">
+                🕒 Last Run: ${stats.lastRunTime}
+                <br>
+                📦 Processed: ${stats.lastProcessedCount || 0}
+            </div>`;
+    }
+
+    div.innerHTML = html;
 }
 
 /* ================= CUSTOMERS ================= */
@@ -161,9 +189,7 @@ async function createTransaction() {
 
     const res = await fetch(
         `/transactions?customerId=${cId}&merchantId=${mId}&amount=${amt}`,
-        {
-            method: "POST"
-        }
+        { method: "POST" }
     );
 
     if (!res.ok) {
@@ -216,7 +242,7 @@ async function loadLogs() {
     data.forEach(l => {
         html += `<tr>
             <td>${l.id}</td>
-            <td>${l.transaction ? l.transaction.id : "-"}</td>
+            <td>${l.transactionId || "-"}</td>
             <td>${l.attemptNumber}</td>
             <td>${l.result}</td>
             <td>${l.message}</td>

@@ -1,6 +1,7 @@
 package com.kailas.settlementengine.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
@@ -11,20 +12,23 @@ public class SettlementLog {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
     private Integer attemptNumber;
     private String message;
     private String result;
     private LocalDateTime timestamp;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "transaction_id")
-    @JsonIgnore  // Prevent circular reference
+    @JsonIgnore
     private Transaction transaction;
 
     public SettlementLog() {}
 
-    public SettlementLog(Integer attemptNumber, String message,
-                         String result, LocalDateTime timestamp,
+    public SettlementLog(Integer attemptNumber,
+                         String message,
+                         String result,
+                         LocalDateTime timestamp,
                          Transaction transaction) {
         this.attemptNumber = attemptNumber;
         this.message = message;
@@ -53,8 +57,10 @@ public class SettlementLog {
         return timestamp;
     }
 
-    public Transaction getTransaction() {
-        return transaction;
+    // ✅ Expose transactionId safely to frontend
+    @JsonProperty("transactionId")
+    public Long getTransactionId() {
+        return transaction != null ? transaction.getId() : null;
     }
 
     public void setAttemptNumber(Integer attemptNumber) {

@@ -53,10 +53,10 @@ public class SettlementService {
 
     /**
      * Main settlement processor.
-     * Runs via Quartz scheduler or manual trigger.
+     * Returns number of transactions processed in this run.
      */
     @Transactional
-    public void processSettlements() {
+    public long processSettlements() {
 
         System.out.println("Processing settlements on thread: "
                 + Thread.currentThread().getName());
@@ -66,13 +66,16 @@ public class SettlementService {
 
         System.out.println("Found " + transactions.size() + " CAPTURED transactions");
 
+        long processedCount = 0;
+
         for (Transaction transaction : transactions) {
 
-            // Atomic claim to prevent double-processing
-            int updatedRows = transactionRepository.claimTransaction(transaction.getId());
+            // Atomic claim (prevents double-processing)
+            int updatedRows =
+                    transactionRepository.claimTransaction(transaction.getId());
 
             if (updatedRows == 0) {
-                // Already claimed by another thread/instance
+                // Already claimed by another instance
                 continue;
             }
 
@@ -117,6 +120,10 @@ public class SettlementService {
 
             settlementLogRepository.save(log);
             transactionRepository.save(transaction);
+
+            processedCount++;
         }
+
+        return processedCount;
     }
 }
