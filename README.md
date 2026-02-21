@@ -8,7 +8,7 @@ It models real-world payment settlement behavior including retry logic, distribu
 
 ## Features
 
-* Transaction lifecycle management:
+* Transaction lifecycle management
   `CAPTURED → PROCESSING → SETTLED / FAILED`
 * Manual settlement trigger via REST API
 * Scheduled settlement execution using Quartz
@@ -18,14 +18,17 @@ It models real-world payment settlement behavior including retry logic, distribu
 * Recovery of stuck `PROCESSING` transactions on application restart
 * Operational monitoring endpoint for settlement metrics
 * Audit trail via settlement attempt logs
+* Dockerized multi-container setup (App + PostgreSQL + Redis)
 
 ---
 
 ## Tech Stack
 
 * Java 17
-* Spring Boot (Web MVC, Data JPA, Quartz, Redis)
+* Spring Boot 4 (Web MVC, Data JPA, Quartz, Redis)
 * PostgreSQL
+* Redis
+* Docker & Docker Compose
 * Maven
 
 ---
@@ -39,28 +42,34 @@ repository/      JPA repositories
 entity/          Domain models and transaction status enums
 scheduler/       Quartz job configuration
 resources/static Minimal frontend (index.html, app.js, style.css)
+Dockerfile       Application container definition
+docker-compose.yml Multi-container orchestration
 ```
 
 ---
 
-## Getting Started
+# Running the Application
+
+You can run the application either locally or using Docker.
+
+---
+
+## Option 1 — Run Locally (Without Docker)
 
 ### 1. Configure Database and Redis
 
-Update connection properties in:
+Update:
 
 ```
 src/main/resources/application.properties
 ```
 
-Set:
+Provide:
 
 * PostgreSQL credentials
 * Redis host and port
 
----
-
-### 2. Run the Application
+### 2. Start Application
 
 ```
 ./mvnw spring-boot:run
@@ -71,6 +80,42 @@ Application runs at:
 ```
 http://localhost:8080
 ```
+
+---
+
+## Option 2 — Run with Docker (Recommended)
+
+This project includes a full Docker Compose setup with:
+
+* Spring Boot application container
+* PostgreSQL container
+* Redis container
+
+### 1. Build and Start Containers
+
+```
+docker compose up --build
+```
+
+### 2. Stop Containers
+
+```
+docker compose down
+```
+
+### 3. Reset All Containers and Volumes
+
+```
+docker compose down -v
+```
+
+Application will be available at:
+
+```
+http://localhost:8080
+```
+
+No manual database or Redis setup required.
 
 ---
 
@@ -117,10 +162,25 @@ GET    /api/settlements/stats
 
 ---
 
-## Reliability Notes
+## Reliability & Infrastructure Design
 
-* Settlement claiming is performed atomically to reduce duplicate execution.
-* Redis lock ensures only one instance executes the scheduled settlement job.
+* Settlement claiming is performed atomically to prevent duplicate execution.
+* Redis-based distributed locking ensures only one scheduler instance processes settlements at a time.
 * On startup, transactions stuck in `PROCESSING` are reverted to `CAPTURED`.
+* Environment-variable–based configuration allows seamless local and containerized execution.
+* Multi-container Docker setup simulates production-style infrastructure.
 
 ---
+
+## Architectural Highlights
+
+* Idempotent settlement execution
+* Retry handling with bounded retry count
+* Quartz-based scheduled job processing
+* Redis-backed distributed lock mechanism
+* Clean separation of controller, service, repository, and scheduler layers
+* Dockerized infrastructure for reproducible environments
+
+
+
+If you want, next we can optimize your Docker image with a multi-stage build to make it production-grade.
