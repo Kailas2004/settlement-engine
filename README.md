@@ -1,17 +1,60 @@
 # Payment Settlement Engine
 
-A Spring Boot application that simulates a payment settlement lifecycle between customers and merchants, with scheduling, retries, distributed locking, monitoring, and an admin frontend.
+Payment Settlement Engine is a Spring Boot application that simulates how payment settlement systems work in production:
 
-## What This Project Does
+- transactions are captured,
+- settlement runs on a schedule or manual trigger,
+- locking prevents overlapping runs,
+- retries are tracked,
+- reconciliation classifies outcomes,
+- exceptions are queued for operator action.
 
-- Creates customers and merchants
-- Creates captured transactions
-- Settles captured transactions through manual trigger or scheduler
-- Uses Redis lock to prevent overlapping settlement execution
-- Tracks retries and writes settlement attempt logs
-- Exposes operational monitoring stats to a frontend dashboard
-- Supports deterministic settlement modes for testing (`RANDOM`, `ALWAYS_SUCCESS`, `ALWAYS_FAIL`)
-- Supports idempotent manual trigger calls with `Idempotency-Key`
+It includes a browser-based admin dashboard plus REST APIs for all core flows.
+
+## Who This Is For
+
+- Students learning distributed systems and backend workflow design.
+- Engineers who want a clean reference for lock-safe batch processing.
+- Anyone who wants to understand settlement lifecycle + reconciliation in one project.
+
+## What It Does
+
+- Create customers and merchants.
+- Create `CAPTURED` transactions.
+- Process settlements with Quartz scheduler (every 30 seconds).
+- Process settlements with manual trigger API/UI.
+- Use Redis lock so only one settlement run executes at a time.
+- Support idempotent manual triggers with `Idempotency-Key`.
+- Record settlement attempts in logs.
+- Reconcile settlement outcomes into `PENDING`, `MATCHED`, `EXCEPTION_QUEUED`, and `RESOLVED`.
+- Allow exception queue actions: retry and resolve with note.
+
+## System Behavior
+
+### Settlement State Machine
+
+```text
+CAPTURED -> PROCESSING -> SETTLED
+                 |
+                 +-> CAPTURED (retry++)
+                 +-> FAILED (if max retries reached)
+```
+
+### Reconciliation State Machine
+
+```text
+PENDING -> MATCHED
+PENDING -> EXCEPTION_QUEUED -> RESOLVED
+PENDING -> EXCEPTION_QUEUED -> RETRY -> PENDING
+```
+
+### Reliability Guarantees
+
+- Atomic claim before processing (`CAPTURED -> PROCESSING`).
+- Redis lock for single active settlement runner.
+- Startup recovery for stuck `PROCESSING` transactions.
+- Idempotent manual trigger replay within configured TTL.
+- Manual trigger processing visibility hold so `PROCESSING` is observable in UI/E2E.
 
 ## Tech Stack
 
@@ -19,85 +62,132 @@ A Spring Boot application that simulates a payment settlement lifecycle between 
 - Spring Boot 4
 - Spring Data JPA
 - Quartz Scheduler
-- Redis (distributed lock)
-- PostgreSQL / H2
-- Vanilla HTML/CSS/JS frontend
+- Redis
+- PostgreSQL (default) or H2 (local isolated runs)
+- Vanilla HTML/CSS/JS
 - Maven
+- Playwright (E2E script)
 
 ## Project Structure
 
 ```text
 src/main/java/com/kailas/settlementengine
-  controller/    REST APIs
-  service/       settlement, lock, monitoring, idempotency logic
+  controller/    REST endpoints
+  entity/        domain models and enums
   repository/    JPA repositories
-  entity/        domain entities and enums
-  scheduler/     Quartz job configuration
+  scheduler/     Quartz config and jobs
+  service/       settlement, lock, idempotency, reconciliation, monitoring
 
 src/main/resources/static
-  index.html     admin UI shell
-  app.js         frontend logic
-  style.css      styling
+  index.html     admin UI
+  app.js         frontend behavior and API calls
+  style.css      styles
+
+scripts/
+  playwright-validate.mjs  automated E2E validation flow
 ```
 
 ## Quick Start
 
-### Option A: Docker (recommended)
+### Option A: Docker Compose
+
+This repo's `Dockerfile` expects a built jar at `target/settlement-engine-0.0.1-SNAPSHOT.jar`.
+
+1. Build:
+
+```bash
+./mvnw clean package -DskipTests
+```
+
+2. Start stack:
 
 ```bash
 docker compose up --build
 ```
 
-Open: `http://localhost:8080`
+3. Open:
 
-Stop:
+```text
+http://localhost:8080
+```
+
+4. Stop:
 
 ```bash
 docker compose down
 ```
 
-### Option B: Local run
+### Option B: Local Run (PostgreSQL + Redis)
 
-1. Start Redis and PostgreSQL (or override to H2 for local testing).
-2. Run:
+1. Start PostgreSQL and Redis.
+2. Run app:
 
 ```bash
 ./mvnw spring-boot:run
 ```
 
-Open: `http://localhost:8080`
+3. Open `http://localhost:8080`.
+
+### Option C: Local Isolated Run (H2 + Redis)
+
+```bash
+SPRING_DATASOURCE_URL=jdbc:h2:file:./data/devdb \
+SPRING_DATASOURCE_USERNAME=sa \
+SPRING_DATASOURCE_PASSWORD= \
+SPRING_JPA_HIBERNATE_DDL_AUTO=update \
+SPRING_DATA_REDIS_HOST=127.0.0.1 \
+SPRING_DATA_REDIS_PORT=6379 \
+./mvnw spring-boot:run
+```
 
 ## Configuration
 
-`src/main/resources/application.properties` supports env-based overrides.
+Use environment variables to override `application.properties`.
 
-### Core
+### Core Runtime
 
-- `SPRING_DATASOURCE_URL`
-- `SPRING_DATASOURCE_USERNAME`
-- `SPRING_DATASOURCE_PASSWORD`
-- `SPRING_DATA_REDIS_HOST`
-- `SPRING_DATA_REDIS_PORT`
+| Variable | Purpose |
+|---|---|
+| `SPRING_DATASOURCE_URL` | Database JDBC URL |
+| `SPRING_DATASOURCE_USERNAME` | Database username |
+| `SPRING_DATASOURCE_PASSWORD` | Database password |
+| `SPRING_DATA_REDIS_HOST` | Redis host |
+| `SPRING_DATA_REDIS_PORT` | Redis port |
 
-### Settlement Outcome Mode
+### Settlement Outcome
 
-- `SETTLEMENT_OUTCOME_MODE`
-  - `RANDOM` (default)
-  - `ALWAYS_SUCCESS`
-  - `ALWAYS_FAIL`
-- `SETTLEMENT_OUTCOME_RANDOM_SEED` (optional, used only with `RANDOM`)
+| Variable | Default | Notes |
+|---|---|---|
+| `SETTLEMENT_OUTCOME_MODE` | `RANDOM` | `RANDOM`, `ALWAYS_SUCCESS`, `ALWAYS_FAIL` |
+| `SETTLEMENT_OUTCOME_RANDOM_SEED` | empty | Optional deterministic seed for `RANDOM` |
 
 ### Trigger Idempotency
 
-- `SETTLEMENT_TRIGGER_IDEMPOTENCY_TTL_SECONDS` (default `600`)
-- `SETTLEMENT_TRIGGER_IDEMPOTENCY_WAIT_TIMEOUT_MILLIS` (default `5000`)
+| Variable | Default | Notes |
+|---|---|---|
+| `SETTLEMENT_TRIGGER_IDEMPOTENCY_TTL_SECONDS` | `600` | Replay window for same idempotency key |
+| `SETTLEMENT_TRIGGER_IDEMPOTENCY_WAIT_TIMEOUT_MILLIS` | `5000` | Wait time for in-flight duplicate request |
 
-## API Endpoints
+### Processing Visibility (Manual Trigger)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `SETTLEMENT_PROCESSING_VISIBILITY_HOLD_MILLIS_MANUAL` | `2500` | Keeps `PROCESSING` visible in UI before final state |
+
+## API Reference
 
 ### Customers
 
 - `POST /customers`
 - `GET /customers`
+
+Example:
+
+```bash
+curl -X POST http://localhost:8080/customers \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test User","email":"test@example.com"}'
+```
 
 ### Merchants
 
@@ -112,7 +202,14 @@ Open: `http://localhost:8080`
 ### Settlement
 
 - `POST /settlement/trigger`
-- Optional header: `Idempotency-Key: your-key`
+- Optional header: `Idempotency-Key: <key>`
+
+Example:
+
+```bash
+curl -X POST http://localhost:8080/settlement/trigger \
+  -H "Idempotency-Key: trigger-001"
+```
 
 ### Logs
 
@@ -122,93 +219,116 @@ Open: `http://localhost:8080`
 
 - `GET /api/settlements/stats`
 
-## Settlement Lifecycle
+### Reconciliation
 
-```text
-CAPTURED -> PROCESSING -> SETTLED
-                 |
-                 +-> CAPTURED (retry++)
-                 +-> FAILED (when max retries reached)
+- `POST /api/reconciliation/run`
+- `GET /api/reconciliation/exceptions`
+- `POST /api/reconciliation/exceptions/{transactionId}/retry`
+- `POST /api/reconciliation/exceptions/{transactionId}/resolve`
+
+Resolve payload example:
+
+```json
+{ "note": "Manually verified and closed" }
 ```
 
-## Reliability Features
+## Frontend Screens
 
-- Atomic transaction claim to avoid duplicate processing
-- Redis lock around settlement execution (manual and scheduled)
-- Startup recovery for stuck `PROCESSING` records
-- Trigger idempotency replay via `Idempotency-Key`
-- Monitoring includes lock acquisition/release metadata
+### Dashboard
 
-## Frontend Walkthrough (Screenshots)
+Live totals, lock state, queue state, and last run metadata.
 
-### 1) Home Dashboard
+![Dashboard](docs/screenshots/step1_homepage.png)
 
-Shows live system metrics, lock state, queue state (`captured`/`processing`), and recent settlement run details.
+### Customer and Merchant Management
 
-![Home Dashboard](docs/screenshots/step1_homepage.png)
+Create and review records from UI tables.
 
-### 2) Customer Creation
+![Customer](docs/screenshots/step2_customer_created.png)
+![Merchant](docs/screenshots/step3_merchant_created.png)
 
-Create a customer and verify it appears in the customer table with ID, name, and email.
+### Transaction Flow
 
-![Customer Created](docs/screenshots/step2_customer_created.png)
-
-### 3) Merchant Creation
-
-Create a merchant and verify name, bank account, and settlement cycle in merchant table.
-
-![Merchant Created](docs/screenshots/step3_merchant_created.png)
-
-### 4) Transaction Creation
-
-Create a transaction linked to customer and merchant. New records begin as `CAPTURED`.
+Create transactions and observe settlement progression.
 
 ![Transaction Captured](docs/screenshots/step4_transaction_captured.png)
-
-### 5) Settlement Triggered
-
-After trigger, transaction reaches settled state (timing of visible `PROCESSING` can be brief depending on runtime speed).
-
 ![Transaction Settled](docs/screenshots/step5_transaction_settled.png)
 
-### 6) Lock Indicator Behavior
+### Lock and Audit
 
-During rapid triggers, lock card reflects active/recent lock activity and prevents overlap.
+Observe lock acquisition/release and verify settlement logs.
 
 ![Lock Status](docs/screenshots/step6_lock_status.png)
-
-### 7) Settlement Logs
-
-Audit trail of attempts with `transactionId`, `attemptNumber`, `result`, and message.
-
 ![Settlement Logs](docs/screenshots/step7_logs.png)
 
-### 8) Idempotency Validation
+### Idempotency
 
-Repeated trigger after settlement keeps transaction state stable and avoids duplicate processing.
+Duplicate triggers do not duplicate settled effects.
 
 ![Idempotency](docs/screenshots/step8_idempotency.png)
 
-## Test Notes
+## Testing
 
-Current test suite includes:
-
-- Settlement outcome mode determinism tests
-- Trigger idempotency service tests (sequential + concurrent)
-- Controller-level idempotency behavior tests
-
-Run tests:
+### Backend Tests
 
 ```bash
 ./mvnw test
 ```
 
+### Playwright End-to-End Validation
+
+Install once:
+
+```bash
+npm install
+```
+
+Run:
+
+```bash
+BASE_URL=http://localhost:8080 SCREENSHOT_DIR=playwright-screenshots node scripts/playwright-validate.mjs
+```
+
+Validation covers:
+
+- application load
+- customer creation
+- merchant creation
+- transaction creation
+- settlement transition and lock behavior
+- logs verification
+- idempotency behavior
+
+## Troubleshooting
+
+### "Failed to run reconciliation" in UI
+
+The UI now shows detailed backend error responses. Check:
+
+- app port/URL is correct
+- Redis is reachable
+- backend is running latest code
+
+### `PROCESSING` not visible during fast manual runs
+
+Increase:
+
+- `SETTLEMENT_PROCESSING_VISIBILITY_HOLD_MILLIS_MANUAL`
+
+### Port already in use
+
+Run on a different port:
+
+```bash
+SERVER_PORT=18080 ./mvnw spring-boot:run
+```
+
 ## Current Status
 
-The project is functionally complete for a robust settlement simulation:
+The project currently has working end-to-end coverage for:
 
-- Backend API and scheduler are working
-- Locking and monitoring are working
-- Frontend admin flows are working
-- Deterministic test modes and idempotent manual trigger are implemented
-
+- settlement processing
+- distributed locking
+- idempotent manual triggering
+- reconciliation + exception queue
+- operational dashboard monitoring
