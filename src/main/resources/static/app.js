@@ -1,13 +1,59 @@
 let autoRefreshInterval = null;
+let dashboardStatsInterval = null;
+let lastObservedLockAcquiredAt = null;
+let lockRecentlyActiveUntil = 0;
+
+const GLOBAL_REFRESH_INTERVAL_MS = 10000;
+const DASHBOARD_STATS_INTERVAL_MS = 100;
+const LOCK_RECENTLY_ACTIVE_WINDOW_MS = 2000;
 
 function showSection(id) {
     document.querySelectorAll(".section").forEach(s => s.classList.add("hidden"));
     document.getElementById(id).classList.remove("hidden");
+    syncDashboardStatsRefresh();
     refreshData();
 }
 
 function startAutoRefresh() {
-    autoRefreshInterval = setInterval(refreshData, 10000);
+    autoRefreshInterval = setInterval(refreshData, GLOBAL_REFRESH_INTERVAL_MS);
+}
+
+function isDashboardVisible() {
+    const dashboard = document.getElementById("dashboard");
+    return dashboard && !dashboard.classList.contains("hidden");
+}
+
+function stopDashboardStatsRefresh() {
+    if (dashboardStatsInterval) {
+        clearInterval(dashboardStatsInterval);
+        dashboardStatsInterval = null;
+    }
+}
+
+function startDashboardStatsRefresh() {
+    stopDashboardStatsRefresh();
+
+    // Keep lock/processing indicators responsive while dashboard is visible.
+    dashboardStatsInterval = setInterval(() => {
+        if (!isDashboardVisible()) return;
+        loadStats().catch(() => {});
+    }, DASHBOARD_STATS_INTERVAL_MS);
+}
+
+function syncDashboardStatsRefresh() {
+    if (isDashboardVisible()) {
+        startDashboardStatsRefresh();
+    } else {
+        stopDashboardStatsRefresh();
+    }
+}
+
+function parseServerDateTime(value) {
+    if (!value || typeof value !== "string") return NaN;
+
+    // Spring LocalDateTime can include microseconds, which Date.parse may reject.
+    const normalized = value.replace(/(\.\d{3})\d+$/, "$1");
+    return Date.parse(normalized);
 }
 
 async function refreshData() {
@@ -16,7 +62,6 @@ async function refreshData() {
     await loadLogs();
     await loadCustomers();
     await loadMerchants();
-    await updateSettlementActivity();
 
     const lastUpdated = document.getElementById("lastUpdated");
     if (lastUpdated) {
@@ -49,13 +94,27 @@ function updateAdvancedStats(stats) {
 
     let html = "";
 
+    const acquiredAtMs = parseServerDateTime(stats.lastLockAcquiredAt);
+
+    if (stats.lastLockAcquiredAt && stats.lastLockAcquiredAt !== lastObservedLockAcquiredAt) {
+        lastObservedLockAcquiredAt = stats.lastLockAcquiredAt;
+        if (!Number.isNaN(acquiredAtMs)) {
+            lockRecentlyActiveUntil = Math.max(
+                lockRecentlyActiveUntil,
+                acquiredAtMs + LOCK_RECENTLY_ACTIVE_WINDOW_MS
+            );
+        }
+    }
+
+    const showActiveLock = stats.lockHeld || Date.now() < lockRecentlyActiveUntil;
+
     // Lock status
-    if (stats.lockHeld) {
+    if (showActiveLock) {
         html += `
             <div style="padding:10px;margin-bottom:8px;background:#fff3cd;color:#856404;border-radius:8px;">
-                🔒 Redis Lock Active
+                🔒 ${stats.lockHeld ? "Redis Lock Active" : "Redis Lock Recently Active"}
                 <br>
-                <small>Holder: ${stats.lockHolder || "Unknown"}</small>
+                <small>Holder: ${stats.lockHolder || stats.lastLockHolder || "Unknown"}</small>
             </div>`;
     } else {
         html += `
@@ -64,16 +123,21 @@ function updateAdvancedStats(stats) {
             </div>`;
     }
 
-    // Processing state
+    // Settlement queue state
     if (stats.processing > 0) {
         html += `
             <div style="padding:10px;margin-bottom:8px;background:#fff3cd;color:#856404;border-radius:8px;">
                 ⏳ Settlement Running — ${stats.processing} processing
             </div>`;
+    } else if (stats.captured > 0) {
+        html += `
+            <div style="padding:10px;margin-bottom:8px;background:#fffbeb;color:#92400e;border-radius:8px;">
+                🧾 Pending Settlements — ${stats.captured} captured
+            </div>`;
     } else {
         html += `
             <div style="padding:10px;margin-bottom:8px;background:#e6fffa;color:#065f46;border-radius:8px;">
-                ✅ No Active Settlement
+                ✅ No Active or Pending Settlements
             </div>`;
     }
 
@@ -84,6 +148,24 @@ function updateAdvancedStats(stats) {
                 🕒 Last Run: ${stats.lastRunTime}
                 <br>
                 📦 Processed: ${stats.lastProcessedCount || 0}
+                <br>
+                <small>Source: ${stats.lastRunSource || "UNKNOWN"}</small>
+            </div>`;
+    }
+
+    // Recent lock lifecycle details
+    if (stats.lastLockAcquiredAt || stats.lastLockReleasedAt || stats.lastLockSkippedAt) {
+        html += `
+            <div style="padding:10px;margin-top:8px;background:#f8fafc;color:#334155;border-radius:8px;">
+                🔐 Last Lock Acquired: ${stats.lastLockAcquiredAt || "-"}
+                <br>
+                🔓 Last Lock Released: ${stats.lastLockReleasedAt || "-"}
+                <br>
+                <small>Source: ${stats.lastLockSource || "UNKNOWN"}</small>
+                <br>
+                <small>Last Skipped Trigger: ${stats.lastLockSkippedAt || "-"}</small>
+                <br>
+                <small>Skipped Source: ${stats.lastSkippedLockSource || "-"}</small>
             </div>`;
     }
 
@@ -257,13 +339,21 @@ async function loadLogs() {
 async function triggerSettlement() {
     if (!confirm("Trigger settlement now?")) return;
 
-    const res = await fetch("/settlement/trigger", { method: "POST" });
+    // Fast polling while trigger is in flight lets the UI show lock acquire/release.
+    const lockPollInterval = setInterval(loadStats, 300);
+    let res;
+    try {
+        res = await fetch("/settlement/trigger", { method: "POST" });
+    } finally {
+        clearInterval(lockPollInterval);
+    }
 
     if (!res.ok) {
         alert("Failed to trigger settlement");
         return;
     }
 
+    await loadStats();
     refreshData();
 }
 
@@ -271,3 +361,4 @@ async function triggerSettlement() {
 
 refreshData();
 startAutoRefresh();
+syncDashboardStatsRefresh();

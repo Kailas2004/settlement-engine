@@ -16,6 +16,14 @@ public class SettlementMonitoringService {
 
     private LocalDateTime lastRunTime;
     private long lastProcessedCount;
+    private String lastRunSource;
+
+    private LocalDateTime lastLockAcquiredAt;
+    private LocalDateTime lastLockReleasedAt;
+    private LocalDateTime lastLockSkippedAt;
+    private String lastLockHolder;
+    private String lastLockSource;
+    private String lastSkippedLockSource;
 
     private static final String LOCK_KEY = "settlement-lock";
 
@@ -53,13 +61,41 @@ public class SettlementMonitoringService {
         // ✅ Last run info
         stats.put("lastRunTime", lastRunTime);
         stats.put("lastProcessedCount", lastProcessedCount);
+        stats.put("lastRunSource", lastRunSource);
+        stats.put("lastLockAcquiredAt", lastLockAcquiredAt);
+        stats.put("lastLockReleasedAt", lastLockReleasedAt);
+        stats.put("lastLockSkippedAt", lastLockSkippedAt);
+        stats.put("lastLockHolder", lastLockHolder);
+        stats.put("lastLockSource", lastLockSource);
+        stats.put("lastSkippedLockSource", lastSkippedLockSource);
 
         return stats;
     }
 
-    // Called by SettlementJob
-    public void recordLastRun(long processedCount) {
+    public synchronized void recordLastRun(long processedCount) {
+        recordLastRun(processedCount, "UNKNOWN");
+    }
+
+    public synchronized void recordLastRun(long processedCount, String source) {
         this.lastRunTime = LocalDateTime.now();
         this.lastProcessedCount = processedCount;
+        this.lastRunSource = source;
+    }
+
+    public synchronized void recordLockAcquired(String lockHolder, String source) {
+        this.lastLockAcquiredAt = LocalDateTime.now();
+        this.lastLockHolder = lockHolder;
+        this.lastLockSource = source;
+    }
+
+    public synchronized void recordLockReleased(String lockHolder, String source) {
+        this.lastLockReleasedAt = LocalDateTime.now();
+        this.lastLockHolder = lockHolder;
+        this.lastLockSource = source;
+    }
+
+    public synchronized void recordLockSkipped(String source) {
+        this.lastLockSkippedAt = LocalDateTime.now();
+        this.lastSkippedLockSource = source;
     }
 }
