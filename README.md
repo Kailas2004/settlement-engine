@@ -1,186 +1,214 @@
 # Payment Settlement Engine
 
-`settlement-engine` is a Spring Boot backend service that simulates and manages transaction settlement workflows between customers and merchants.
+A Spring Boot application that simulates a payment settlement lifecycle between customers and merchants, with scheduling, retries, distributed locking, monitoring, and an admin frontend.
 
-It models real-world payment settlement behavior including retry logic, distributed locking, job scheduling, failure recovery, and operational monitoring.
+## What This Project Does
 
----
-
-## Features
-
-* Transaction lifecycle management
-  `CAPTURED → PROCESSING → SETTLED / FAILED`
-* Manual settlement trigger via REST API
-* Scheduled settlement execution using Quartz
-* Distributed locking using Redis
-* Retry-aware settlement processing with per-transaction retry counters
-* Atomic transaction claiming to prevent duplicate processing
-* Recovery of stuck `PROCESSING` transactions on application restart
-* Operational monitoring endpoint for settlement metrics
-* Audit trail via settlement attempt logs
-* Dockerized multi-container setup (App + PostgreSQL + Redis)
-
----
+- Creates customers and merchants
+- Creates captured transactions
+- Settles captured transactions through manual trigger or scheduler
+- Uses Redis lock to prevent overlapping settlement execution
+- Tracks retries and writes settlement attempt logs
+- Exposes operational monitoring stats to a frontend dashboard
+- Supports deterministic settlement modes for testing (`RANDOM`, `ALWAYS_SUCCESS`, `ALWAYS_FAIL`)
+- Supports idempotent manual trigger calls with `Idempotency-Key`
 
 ## Tech Stack
 
-* Java 17
-* Spring Boot 4 (Web MVC, Data JPA, Quartz, Redis)
-* PostgreSQL
-* Redis
-* Docker & Docker Compose
-* Maven
-
----
+- Java 17
+- Spring Boot 4
+- Spring Data JPA
+- Quartz Scheduler
+- Redis (distributed lock)
+- PostgreSQL / H2
+- Vanilla HTML/CSS/JS frontend
+- Maven
 
 ## Project Structure
 
-```
-controller/      REST APIs (customers, merchants, transactions, settlement, monitoring)
-service/         Business logic (settlement execution, retry handling, locking)
-repository/      JPA repositories
-entity/          Domain models and transaction status enums
-scheduler/       Quartz job configuration
-resources/static Minimal frontend (index.html, app.js, style.css)
-Dockerfile       Application container definition
-docker-compose.yml Multi-container orchestration
-```
+```text
+src/main/java/com/kailas/settlementengine
+  controller/    REST APIs
+  service/       settlement, lock, monitoring, idempotency logic
+  repository/    JPA repositories
+  entity/        domain entities and enums
+  scheduler/     Quartz job configuration
 
----
-
-# Running the Application
-
-You can run the application either locally or using Docker.
-
----
-
-## Option 1 — Run Locally (Without Docker)
-
-### 1. Configure Database and Redis
-
-Update:
-
-```
-src/main/resources/application.properties
+src/main/resources/static
+  index.html     admin UI shell
+  app.js         frontend logic
+  style.css      styling
 ```
 
-Provide:
+## Quick Start
 
-* PostgreSQL credentials
-* Redis host and port
+### Option A: Docker (recommended)
 
-### 2. Start Application
-
-```
-./mvnw spring-boot:run
-```
-
-Application runs at:
-
-```
-http://localhost:8080
-```
-
----
-
-## Option 2 — Run with Docker (Recommended)
-
-This project includes a full Docker Compose setup with:
-
-* Spring Boot application container
-* PostgreSQL container
-* Redis container
-
-### 1. Build and Start Containers
-
-```
+```bash
 docker compose up --build
 ```
 
-### 2. Stop Containers
+Open: `http://localhost:8080`
 
-```
+Stop:
+
+```bash
 docker compose down
 ```
 
-### 3. Reset All Containers and Volumes
+### Option B: Local run
 
-```
-docker compose down -v
-```
+1. Start Redis and PostgreSQL (or override to H2 for local testing).
+2. Run:
 
-Application will be available at:
-
-```
-http://localhost:8080
+```bash
+./mvnw spring-boot:run
 ```
 
-No manual database or Redis setup required.
+Open: `http://localhost:8080`
 
----
+## Configuration
+
+`src/main/resources/application.properties` supports env-based overrides.
+
+### Core
+
+- `SPRING_DATASOURCE_URL`
+- `SPRING_DATASOURCE_USERNAME`
+- `SPRING_DATASOURCE_PASSWORD`
+- `SPRING_DATA_REDIS_HOST`
+- `SPRING_DATA_REDIS_PORT`
+
+### Settlement Outcome Mode
+
+- `SETTLEMENT_OUTCOME_MODE`
+  - `RANDOM` (default)
+  - `ALWAYS_SUCCESS`
+  - `ALWAYS_FAIL`
+- `SETTLEMENT_OUTCOME_RANDOM_SEED` (optional, used only with `RANDOM`)
+
+### Trigger Idempotency
+
+- `SETTLEMENT_TRIGGER_IDEMPOTENCY_TTL_SECONDS` (default `600`)
+- `SETTLEMENT_TRIGGER_IDEMPOTENCY_WAIT_TIMEOUT_MILLIS` (default `5000`)
 
 ## API Endpoints
 
 ### Customers
 
-```
-POST   /customers
-GET    /customers
-```
+- `POST /customers`
+- `GET /customers`
 
 ### Merchants
 
-```
-POST   /merchants
-GET    /merchants
-```
+- `POST /merchants`
+- `GET /merchants`
 
 ### Transactions
 
-```
-POST   /transactions?customerId={id}&merchantId={id}&amount={value}
-GET    /transactions
-```
+- `POST /transactions?customerId={id}&merchantId={id}&amount={value}`
+- `GET /transactions`
 
 ### Settlement
 
-```
-POST   /settlement/trigger
-```
+- `POST /settlement/trigger`
+- Optional header: `Idempotency-Key: your-key`
 
 ### Logs
 
-```
-GET    /logs
-```
+- `GET /logs`
 
 ### Monitoring
 
+- `GET /api/settlements/stats`
+
+## Settlement Lifecycle
+
+```text
+CAPTURED -> PROCESSING -> SETTLED
+                 |
+                 +-> CAPTURED (retry++)
+                 +-> FAILED (when max retries reached)
 ```
-GET    /api/settlements/stats
+
+## Reliability Features
+
+- Atomic transaction claim to avoid duplicate processing
+- Redis lock around settlement execution (manual and scheduled)
+- Startup recovery for stuck `PROCESSING` records
+- Trigger idempotency replay via `Idempotency-Key`
+- Monitoring includes lock acquisition/release metadata
+
+## Frontend Walkthrough (Screenshots)
+
+### 1) Home Dashboard
+
+Shows live system metrics, lock state, queue state (`captured`/`processing`), and recent settlement run details.
+
+![Home Dashboard](docs/screenshots/step1_homepage.png)
+
+### 2) Customer Creation
+
+Create a customer and verify it appears in the customer table with ID, name, and email.
+
+![Customer Created](docs/screenshots/step2_customer_created.png)
+
+### 3) Merchant Creation
+
+Create a merchant and verify name, bank account, and settlement cycle in merchant table.
+
+![Merchant Created](docs/screenshots/step3_merchant_created.png)
+
+### 4) Transaction Creation
+
+Create a transaction linked to customer and merchant. New records begin as `CAPTURED`.
+
+![Transaction Captured](docs/screenshots/step4_transaction_captured.png)
+
+### 5) Settlement Triggered
+
+After trigger, transaction reaches settled state (timing of visible `PROCESSING` can be brief depending on runtime speed).
+
+![Transaction Settled](docs/screenshots/step5_transaction_settled.png)
+
+### 6) Lock Indicator Behavior
+
+During rapid triggers, lock card reflects active/recent lock activity and prevents overlap.
+
+![Lock Status](docs/screenshots/step6_lock_status.png)
+
+### 7) Settlement Logs
+
+Audit trail of attempts with `transactionId`, `attemptNumber`, `result`, and message.
+
+![Settlement Logs](docs/screenshots/step7_logs.png)
+
+### 8) Idempotency Validation
+
+Repeated trigger after settlement keeps transaction state stable and avoids duplicate processing.
+
+![Idempotency](docs/screenshots/step8_idempotency.png)
+
+## Test Notes
+
+Current test suite includes:
+
+- Settlement outcome mode determinism tests
+- Trigger idempotency service tests (sequential + concurrent)
+- Controller-level idempotency behavior tests
+
+Run tests:
+
+```bash
+./mvnw test
 ```
 
----
+## Current Status
 
-## Reliability & Infrastructure Design
+The project is functionally complete for a robust settlement simulation:
 
-* Settlement claiming is performed atomically to prevent duplicate execution.
-* Redis-based distributed locking ensures only one scheduler instance processes settlements at a time.
-* On startup, transactions stuck in `PROCESSING` are reverted to `CAPTURED`.
-* Environment-variable–based configuration allows seamless local and containerized execution.
-* Multi-container Docker setup simulates production-style infrastructure.
+- Backend API and scheduler are working
+- Locking and monitoring are working
+- Frontend admin flows are working
+- Deterministic test modes and idempotent manual trigger are implemented
 
----
-
-## Architectural Highlights
-
-* Idempotent settlement execution
-* Retry handling with bounded retry count
-* Quartz-based scheduled job processing
-* Redis-backed distributed lock mechanism
-* Clean separation of controller, service, repository, and scheduler layers
-* Dockerized infrastructure for reproducible environments
-
-
-
-If you want, next we can optimize your Docker image with a multi-stage build to make it production-grade.
