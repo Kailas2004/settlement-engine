@@ -11,12 +11,6 @@ Payment Settlement Engine is a Spring Boot application that simulates how paymen
 
 It includes a browser-based admin dashboard plus REST APIs for all core flows.
 
-## Who This Is For
-
-- Students learning distributed systems and backend workflow design.
-- Engineers who want a clean reference for lock-safe batch processing.
-- Anyone who wants to understand settlement lifecycle + reconciliation in one project.
-
 ## What It Does
 
 - Create customers and merchants.
