@@ -1,0 +1,8 @@
+.git
+.idea
+target
+data
+node_modules
+playwright-screenshots
+*.iml
+*.log
