@@ -11,20 +11,20 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Random;
 
 @Service
 public class SettlementService {
 
     private final TransactionRepository transactionRepository;
     private final SettlementLogRepository settlementLogRepository;
-
-    private final Random random = new Random();
+    private final SettlementOutcomeDecider outcomeDecider;
 
     public SettlementService(TransactionRepository transactionRepository,
-                             SettlementLogRepository settlementLogRepository) {
+                             SettlementLogRepository settlementLogRepository,
+                             SettlementOutcomeDecider outcomeDecider) {
         this.transactionRepository = transactionRepository;
         this.settlementLogRepository = settlementLogRepository;
+        this.outcomeDecider = outcomeDecider;
     }
 
     /**
@@ -79,7 +79,7 @@ public class SettlementService {
                 continue;
             }
 
-            boolean success = random.nextBoolean();
+            boolean success = outcomeDecider.shouldSucceed();
 
             SettlementLog log = new SettlementLog();
             log.setAttemptNumber(transaction.getRetryCount() + 1);
