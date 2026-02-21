@@ -1,4 +1,4 @@
-# Settlement Engine
+# Payment Settlement Engine
 
 `settlement-engine` is a Spring Boot backend service that simulates and manages transaction settlement workflows between customers and merchants.
 
