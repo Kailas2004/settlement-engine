@@ -74,7 +74,7 @@ public class SecurityConfig {
                         .permitAll()
                 )
                 .logout(logout -> logout
-                        .logoutSuccessUrl("/login?logout")
+                        .logoutSuccessUrl("/login")
                         .permitAll()
                 );
 
@@ -104,9 +104,14 @@ public class SecurityConfig {
     }
 
     private void validateCredentialConfiguration() {
-        boolean usingDefaultCredentials =
-                DEFAULT_ADMIN_PASSWORD.equals(adminPassword)
-                        || DEFAULT_USER_PASSWORD.equals(userPassword);
+        boolean adminPasswordUsingFallback =
+                System.getenv("APP_ADMIN_PASSWORD") == null
+                        && DEFAULT_ADMIN_PASSWORD.equals(adminPassword);
+        boolean userPasswordUsingFallback =
+                System.getenv("APP_USER_PASSWORD") == null
+                        && DEFAULT_USER_PASSWORD.equals(userPassword);
+
+        boolean usingDefaultCredentials = adminPasswordUsingFallback || userPasswordUsingFallback;
 
         if (usingDefaultCredentials && railwayEnvironment != null && !railwayEnvironment.isBlank()) {
             throw new IllegalStateException(

@@ -1,40 +1,53 @@
 # Payment Settlement Engine
 
-Payment Settlement Engine is a Spring Boot application that simulates how payment settlement systems work in production:
+Payment Settlement Engine is a Spring Boot project that simulates a real settlement lifecycle:
 
-- transactions are captured,
-- settlement runs on a schedule or manual trigger,
-- locking prevents overlapping runs,
-- retries are tracked,
-- reconciliation classifies outcomes,
-- exceptions are queued for operator action.
+- payment capture
+- scheduled/manual settlement execution
+- distributed lock protection
+- retry and failure handling
+- reconciliation and exception queue workflows
+- role-based operational dashboard
 
-It includes a browser-based admin dashboard plus REST APIs for all core flows.
+It is designed as a portfolio-quality backend + frontend system that demonstrates reliability and operational behavior, not just CRUD APIs.
 
-## What It Does
+## Why This Project
 
-- Create customers and merchants.
-- Create `CAPTURED` transactions.
-- Process settlements with Quartz scheduler (every 30 seconds).
-- Process settlements with manual trigger API/UI.
-- Use Redis lock so only one settlement run executes at a time.
-- Support idempotent manual triggers with `Idempotency-Key`.
-- Record settlement attempts in logs.
-- Reconcile settlement outcomes into `PENDING`, `MATCHED`, `EXCEPTION_QUEUED`, and `RESOLVED`.
-- Allow exception queue actions: retry and resolve with note.
+Modern payment systems need strong guarantees:
 
-## System Behavior
+- avoid duplicate settlement runs
+- recover safely from partial processing
+- support idempotent external triggers
+- provide observability for operators
+- enforce role-based access control
 
-### Settlement State Machine
+This project implements those concerns end-to-end with a browser UI and API surface.
+
+## Core Features
+
+- Customer and merchant onboarding
+- Transaction creation in `CAPTURED` state
+- Quartz-driven settlement scheduler (every 30 seconds)
+- Manual settlement trigger API/UI
+- Redis lock to guarantee a single active settlement runner
+- Idempotent trigger behavior with `Idempotency-Key`
+- Settlement logging per attempt
+- Reconciliation pipeline with `PENDING`, `MATCHED`, `EXCEPTION_QUEUED`, `RESOLVED`
+- Exception queue actions: retry and resolve
+- Spring Security with `ADMIN` and `USER` roles
+
+## State Transitions
+
+### Settlement
 
 ```text
 CAPTURED -> PROCESSING -> SETTLED
                  |
                  +-> CAPTURED (retry++)
-                 +-> FAILED (if max retries reached)
+                 +-> FAILED (max retries reached)
 ```
 
-### Reconciliation State Machine
+### Reconciliation
 
 ```text
 PENDING -> MATCHED
@@ -42,119 +55,95 @@ PENDING -> EXCEPTION_QUEUED -> RESOLVED
 PENDING -> EXCEPTION_QUEUED -> RETRY -> PENDING
 ```
 
-### Reliability Guarantees
-
-- Atomic claim before processing (`CAPTURED -> PROCESSING`).
-- Redis lock for single active settlement runner.
-- Startup recovery for stuck `PROCESSING` transactions.
-- Idempotent manual trigger replay within configured TTL.
-- Manual trigger processing visibility hold so `PROCESSING` is observable in UI/E2E.
-
 ## Tech Stack
 
 - Java 17
 - Spring Boot 4
 - Spring Data JPA
-- Quartz Scheduler
+- PostgreSQL
 - Redis
-- PostgreSQL (default) or H2 (local isolated runs)
-- Vanilla HTML/CSS/JS
+- Quartz Scheduler
+- Vanilla HTML/CSS/JS frontend
 - Maven
-- Playwright (E2E script)
+- Playwright (E2E validation)
 
-## Project Structure
+## Repository Structure
 
 ```text
 src/main/java/com/kailas/settlementengine
-  controller/    REST endpoints
-  entity/        domain models and enums
-  repository/    JPA repositories
-  scheduler/     Quartz config and jobs
-  service/       settlement, lock, idempotency, reconciliation, monitoring
+  controller/      REST endpoints
+  service/         settlement, lock, idempotency, reconciliation, monitoring
+  scheduler/       Quartz config and job
+  entity/          domain models and enums
+  repository/      JPA repositories
+  config/          Spring Security configuration
 
 src/main/resources/static
-  index.html     admin UI
-  app.js         frontend behavior and API calls
-  style.css      styles
+  index.html       dashboard shell
+  app.js           frontend behavior and API integration
+  style.css        UI styling
 
 scripts/
-  playwright-validate.mjs  automated E2E validation flow
+  playwright-validate.mjs  core settlement E2E flow
+  role-validation.mjs      role-based admin/user E2E flow
 ```
 
 ## Quick Start
 
-### Option A: Docker Compose
-
-1. Start stack:
+### 1. Clone
 
 ```bash
-docker compose up --build
+git clone <your-repo-url>
+cd settlement-engine
 ```
 
-2. Open:
+### 2. Start Dependencies (Postgres + Redis)
+
+```bash
+docker compose up -d postgres redis
+```
+
+### 3. Configure Credentials (Recommended)
+
+```bash
+export APP_ADMIN_USERNAME=admin
+export APP_ADMIN_PASSWORD='<your-admin-password>'
+export APP_USER_USERNAME=user
+export APP_USER_PASSWORD='<your-user-password>'
+```
+
+### 4. Run Application
+
+```bash
+./mvnw spring-boot:run
+```
+
+### 5. Open Dashboard
 
 ```text
 http://localhost:8080
 ```
 
-3. Stop:
+Login with the credentials you set in step 3.
 
-```bash
-docker compose down
-```
+## Auth and Roles
 
-### Option B: Local Run (PostgreSQL + Redis)
+Two roles are supported:
 
-1. Start PostgreSQL and Redis.
-2. Run app:
+- `ADMIN`: full read/write access (create/trigger/reconcile/exception actions)
+- `USER`: read-only dashboards/tables; write APIs return `403`
 
-```bash
-./mvnw spring-boot:run
-```
+For public demo access, share only the `USER` account. Keep `ADMIN` credentials private.
 
-3. Open `http://localhost:8080`.
+Auth endpoints:
 
-### Option C: Local Isolated Run (H2 + Redis)
-
-```bash
-SPRING_DATASOURCE_URL=jdbc:h2:file:./data/devdb \
-SPRING_DATASOURCE_USERNAME=sa \
-SPRING_DATASOURCE_PASSWORD= \
-SPRING_JPA_HIBERNATE_DDL_AUTO=update \
-SPRING_DATA_REDIS_HOST=127.0.0.1 \
-SPRING_DATA_REDIS_PORT=6379 \
-./mvnw spring-boot:run
-```
-
-### Option D: Railway (Production)
-
-This project is deployed successfully on Railway:
-
-- Live URL: `https://settlement-engine-production.up.railway.app`
-
-Required services:
-
-- PostgreSQL
-- Redis
-
-Required service variables on the app service:
-
-- `SPRING_DATASOURCE_URL`
-- `SPRING_DATASOURCE_USERNAME`
-- `SPRING_DATASOURCE_PASSWORD`
-- `SPRING_DATA_REDIS_HOST`
-- `SPRING_DATA_REDIS_PORT`
-- `SPRING_DATA_REDIS_USERNAME`
-- `SPRING_DATA_REDIS_PASSWORD`
-
-Notes:
-
-- The Dockerfile uses a multi-stage build, so Railway does not need a prebuilt local jar.
-- Railway injects `PORT`; app already supports it with `server.port=${PORT:8080}`.
+- login form: `GET /login`, `POST /login`
+- logout: `POST /logout`
+- current identity: `GET /api/auth/me`
 
 ## Configuration
 
-Use environment variables to override `application.properties`.
+All runtime values are environment-variable driven.
 
 ### Core Runtime
 
@@ -167,81 +156,64 @@ Use environment variables to override `application.properties`.
 | `SPRING_DATA_REDIS_PORT` | Redis port |
 | `SPRING_DATA_REDIS_USERNAME` | Redis username (if required) |
 | `SPRING_DATA_REDIS_PASSWORD` | Redis password (if required) |
-| `PORT` | Runtime port (Railway provides this automatically) |
+| `PORT` | Runtime port (set automatically on Railway) |
 
-### Settlement Outcome
+### Security
+
+| Variable | Purpose |
+|---|---|
+| `APP_ADMIN_USERNAME` | Admin username |
+| `APP_ADMIN_PASSWORD` | Admin password |
+| `APP_USER_USERNAME` | User username |
+| `APP_USER_PASSWORD` | User password |
+
+### Settlement Behavior
 
 | Variable | Default | Notes |
 |---|---|---|
 | `SETTLEMENT_OUTCOME_MODE` | `RANDOM` | `RANDOM`, `ALWAYS_SUCCESS`, `ALWAYS_FAIL` |
 | `SETTLEMENT_OUTCOME_RANDOM_SEED` | empty | Optional deterministic seed for `RANDOM` |
+| `SETTLEMENT_TRIGGER_IDEMPOTENCY_TTL_SECONDS` | `600` | Trigger replay window |
+| `SETTLEMENT_TRIGGER_IDEMPOTENCY_WAIT_TIMEOUT_MILLIS` | `5000` | Wait timeout for in-flight duplicate key |
 
-### Trigger Idempotency
-
-| Variable | Default | Notes |
-|---|---|---|
-| `SETTLEMENT_TRIGGER_IDEMPOTENCY_TTL_SECONDS` | `600` | Replay window for same idempotency key |
-| `SETTLEMENT_TRIGGER_IDEMPOTENCY_WAIT_TIMEOUT_MILLIS` | `5000` | Wait time for in-flight duplicate request |
-
-### Processing Visibility (Manual Trigger)
-
-| Variable | Default | Notes |
-|---|---|---|
-| `SETTLEMENT_PROCESSING_VISIBILITY_HOLD_MILLIS_MANUAL` | `2500` | Keeps `PROCESSING` visible in UI before final state |
-
-## API Reference
+## API Summary
 
 ### Customers
 
-- `POST /customers`
 - `GET /customers`
-
-Example:
-
-```bash
-curl -X POST http://localhost:8080/customers \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Test User","email":"test@example.com"}'
-```
+- `POST /customers` (`ADMIN`)
 
 ### Merchants
 
-- `POST /merchants`
 - `GET /merchants`
+- `POST /merchants` (`ADMIN`)
 
 ### Transactions
 
-- `POST /transactions?customerId={id}&merchantId={id}&amount={value}`
 - `GET /transactions`
+- `POST /transactions?customerId={id}&merchantId={id}&amount={value}` (`ADMIN`)
 
 ### Settlement
 
-- `POST /settlement/trigger`
-- Optional header: `Idempotency-Key: <key>`
-
-Example:
-
-```bash
-curl -X POST http://localhost:8080/settlement/trigger \
-  -H "Idempotency-Key: trigger-001"
-```
-
-### Logs
-
-- `GET /logs`
+- `POST /settlement/trigger` (`ADMIN`)
+- Optional request header: `Idempotency-Key: <value>`
 
 ### Monitoring
 
 - `GET /api/settlements/stats`
 
+### Logs
+
+- `GET /logs`
+
 ### Reconciliation
 
-- `POST /api/reconciliation/run`
 - `GET /api/reconciliation/exceptions`
-- `POST /api/reconciliation/exceptions/{transactionId}/retry`
-- `POST /api/reconciliation/exceptions/{transactionId}/resolve`
+- `POST /api/reconciliation/run` (`ADMIN`)
+- `POST /api/reconciliation/exceptions/{transactionId}/retry` (`ADMIN`)
+- `POST /api/reconciliation/exceptions/{transactionId}/resolve` (`ADMIN`)
 
-Resolve payload example:
+Resolve payload:
 
 ```json
 { "note": "Manually verified and closed" }
@@ -251,109 +223,122 @@ Resolve payload example:
 
 ### Dashboard
 
-Live totals, lock state, queue state, and last run metadata.
+Live totals, lock state, queue state, and run metadata.
 
 ![Dashboard](docs/screenshots/step1_homepage.png)
 
 ### Customer and Merchant Management
 
-Create and review records from UI tables.
-
 ![Customer](docs/screenshots/step2_customer_created.png)
 ![Merchant](docs/screenshots/step3_merchant_created.png)
 
-### Transaction Flow
-
-Create transactions and observe settlement progression.
+### Transaction Lifecycle
 
 ![Transaction Captured](docs/screenshots/step4_transaction_captured.png)
 ![Transaction Settled](docs/screenshots/step5_transaction_settled.png)
 
 ### Lock and Audit
 
-Observe lock acquisition/release and verify settlement logs.
-
 ![Lock Status](docs/screenshots/step6_lock_status.png)
 ![Settlement Logs](docs/screenshots/step7_logs.png)
 
 ### Idempotency
 
-Duplicate triggers do not duplicate settled effects.
-
 ![Idempotency](docs/screenshots/step8_idempotency.png)
 
 ## Testing
 
-### Backend Tests
+### Backend Unit/Integration Tests
 
 ```bash
 ./mvnw test
 ```
 
-### Playwright End-to-End Validation
-
-Install once:
+### Core Playwright E2E Flow
 
 ```bash
 npm install
+BASE_URL=http://localhost:8080 \
+SCREENSHOT_DIR=playwright-screenshots \
+node scripts/playwright-validate.mjs
 ```
 
-Run:
+### Role-Based Playwright E2E Flow
 
 ```bash
-BASE_URL=http://localhost:8080 SCREENSHOT_DIR=playwright-screenshots node scripts/playwright-validate.mjs
+BASE_URL=http://localhost:8080 \
+ADMIN_USERNAME=admin \
+ADMIN_PASSWORD='<admin-password>' \
+USER_USERNAME=user \
+USER_PASSWORD='<user-password>' \
+node scripts/role-validation.mjs
 ```
 
-Validation covers:
+## Deployment (Railway)
 
-- application load
-- customer creation
-- merchant creation
-- transaction creation
-- settlement transition and lock behavior
-- logs verification
-- idempotency behavior
+Live app URL:
+
+- `https://settlement-engine-production.up.railway.app`
+
+### Public Demo Login (Read-Only)
+
+Use this account to explore the deployed dashboard safely:
+
+- Username: `user`
+- Password: `user123`
+
+Admin credentials are intentionally not documented in this README.
+
+Required services:
+
+- PostgreSQL
+- Redis
+
+Required app variables:
+
+- `SPRING_DATASOURCE_URL`
+- `SPRING_DATASOURCE_USERNAME`
+- `SPRING_DATASOURCE_PASSWORD`
+- `SPRING_DATA_REDIS_HOST`
+- `SPRING_DATA_REDIS_PORT`
+- `SPRING_DATA_REDIS_USERNAME`
+- `SPRING_DATA_REDIS_PASSWORD`
+- `APP_ADMIN_USERNAME`
+- `APP_ADMIN_PASSWORD`
+- `APP_USER_USERNAME`
+- `APP_USER_PASSWORD`
 
 ## Troubleshooting
 
-### "Failed to run reconciliation" in UI
+### Reconciliation fails in UI
 
-The UI now shows detailed backend error responses. Check:
+Check:
 
-- app port/URL is correct
-- Redis is reachable
-- backend is running latest code
+- backend logs for detailed error
+- Redis connectivity
+- datasource credentials
 
-### `PROCESSING` not visible during fast manual runs
+### Logout page looks stale
 
-Increase:
+Hard refresh browser assets after deploy:
 
-- `SETTLEMENT_PROCESSING_VISIBILITY_HOLD_MILLIS_MANUAL`
+- macOS: `Cmd + Shift + R`
 
-### Port already in use
+### App crashes on Railway startup
 
-Run on a different port:
+Most common causes:
 
-```bash
-PORT=18080 ./mvnw spring-boot:run
-```
-
-### Railway service shows `CRASHED` after deploy
-
-Most common cause: missing datasource/redis variables on the app service.
-
-Verify:
-
-- `SPRING_DATASOURCE_*` points to Railway Postgres service values
-- `SPRING_DATA_REDIS_*` points to Railway Redis service values
-- logs no longer show `Connection refused` to `localhost:5432`
+- missing `SPRING_DATASOURCE_*`
+- missing `SPRING_DATA_REDIS_*`
+- missing `APP_ADMIN_PASSWORD` / `APP_USER_PASSWORD`
 
 ## Current Status
 
-The project currently has working end-to-end coverage for:
+Working and validated end-to-end:
 
-- settlement processing
+- settlement processing and retries
 - distributed locking
-- idempotent manual triggering
+- idempotent trigger handling
 - reconciliation + exception queue
-- operational dashboard monitoring
+- role-based frontend/backend access control
+- dashboard operational visibility

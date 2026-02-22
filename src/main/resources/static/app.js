@@ -149,7 +149,9 @@ async function refreshData() {
 /* ================= DASHBOARD ================= */
 
 async function loadStats() {
-    const res = await fetch("/api/settlements/stats");
+    const res = await fetch(`/api/settlements/stats?t=${Date.now()}`, {
+        cache: "no-store"
+    });
     if (!res.ok) return;
 
     const s = await res.json();
@@ -543,9 +545,13 @@ async function triggerSettlement() {
     refreshData();
 }
 
-async function logout() {
-    await fetch("/logout", { method: "POST" });
-    window.location.href = "/login?logout";
+function logout() {
+    // Use a real form POST so browser follows Spring Security's logout redirect.
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = "/logout";
+    document.body.appendChild(form);
+    form.submit();
 }
 
 /* ================= INIT ================= */
