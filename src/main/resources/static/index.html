@@ -10,6 +10,7 @@
 
     <div class="sidebar">
         <h2>Settlement Engine</h2>
+        <p id="authInfo" class="auth-info"></p>
         <button onclick="showSection('dashboard')">Dashboard</button>
         <button onclick="showSection('customers')">Customers</button>
         <button onclick="showSection('merchants')">Merchants</button>
@@ -17,6 +18,7 @@
         <button onclick="showSection('reconciliation')">Reconciliation</button>
         <button onclick="showSection('logs')">Settlement Logs</button>
         <button id="triggerSettlementBtn" onclick="triggerSettlement()">Trigger Settlement</button>
+        <button id="logoutBtn" onclick="logout()">Logout</button>
     </div>
 
     <div class="main">
@@ -44,7 +46,7 @@
         <div id="customers" class="section hidden">
             <h1>Customers</h1>
 
-            <div class="form">
+            <div class="form" id="customerForm">
                 <input type="text" id="customerName" placeholder="Name">
                 <input type="email" id="customerEmail" placeholder="Email">
                 <button onclick="createCustomer()">Create</button>
@@ -57,7 +59,7 @@
         <div id="merchants" class="section hidden">
             <h1>Merchants</h1>
 
-            <div class="form">
+            <div class="form" id="merchantForm">
                 <input type="text" id="merchantName" placeholder="Name">
                 <input type="text" id="merchantBank" placeholder="Bank Account">
                 <input type="text" id="merchantCycle" placeholder="Settlement Cycle (DAILY)">
@@ -71,7 +73,7 @@
         <div id="transactions" class="section hidden">
             <h1>Transactions</h1>
 
-            <div class="form">
+            <div class="form" id="transactionForm">
                 <input type="number" id="customerId" placeholder="Customer ID">
                 <input type="number" id="merchantId" placeholder="Merchant ID">
                 <input type="number" id="amount" placeholder="Amount">
@@ -85,7 +87,7 @@
         <div id="reconciliation" class="section hidden">
             <h1>Reconciliation & Exceptions</h1>
 
-            <div class="form">
+            <div class="form" id="reconciliationControls">
                 <button onclick="runReconciliation()">Run Reconciliation</button>
             </div>
 

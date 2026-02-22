@@ -2,10 +2,32 @@ let autoRefreshInterval = null;
 let dashboardStatsInterval = null;
 let lastObservedLockAcquiredAt = null;
 let lockRecentlyActiveUntil = 0;
+let currentUser = null;
+let currentRoles = [];
 
 const GLOBAL_REFRESH_INTERVAL_MS = 10000;
 const DASHBOARD_STATS_INTERVAL_MS = 100;
 const LOCK_RECENTLY_ACTIVE_WINDOW_MS = 2000;
+
+function hasRole(role) {
+    return currentRoles.includes(role) || currentRoles.includes(`ROLE_${role}`);
+}
+
+function isAdminUser() {
+    return hasRole("ADMIN");
+}
+
+function requireAdminAction(actionName) {
+    if (isAdminUser()) return true;
+    alert(`${actionName} is available only for admin users.`);
+    return false;
+}
+
+function setElementVisible(id, visible) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = visible ? "" : "none";
+}
 
 function showSection(id) {
     document.querySelectorAll(".section").forEach(s => s.classList.add("hidden"));
@@ -75,6 +97,37 @@ async function readErrorMessage(response) {
         return `HTTP ${response.status}: ${body}`;
     } catch (_) {
         return `HTTP ${response.status}`;
+    }
+}
+
+async function loadCurrentUser() {
+    const res = await fetch("/api/auth/me");
+    if (res.status === 401 || res.status === 403) {
+        window.location.href = "/login";
+        return;
+    }
+    if (!res.ok) {
+        throw new Error(await readErrorMessage(res));
+    }
+
+    const data = await res.json();
+    currentUser = data.username || null;
+    currentRoles = Array.isArray(data.roles) ? data.roles : [];
+}
+
+function applyRoleAccess() {
+    const isAdmin = isAdminUser();
+
+    setElementVisible("customerForm", isAdmin);
+    setElementVisible("merchantForm", isAdmin);
+    setElementVisible("transactionForm", isAdmin);
+    setElementVisible("reconciliationControls", isAdmin);
+    setElementVisible("triggerSettlementBtn", isAdmin);
+
+    const authInfo = document.getElementById("authInfo");
+    if (authInfo) {
+        const roleLabel = isAdmin ? "ADMIN" : "USER";
+        authInfo.innerText = `${currentUser || "unknown"} (${roleLabel})`;
     }
 }
 
@@ -199,6 +252,8 @@ function updateAdvancedStats(stats) {
 /* ================= CUSTOMERS ================= */
 
 async function createCustomer() {
+    if (!requireAdminAction("Customer creation")) return;
+
     const name = customerName.value.trim();
     const email = customerEmail.value.trim();
 
@@ -240,6 +295,8 @@ async function loadCustomers() {
 /* ================= MERCHANTS ================= */
 
 async function createMerchant() {
+    if (!requireAdminAction("Merchant creation")) return;
+
     const name = merchantName.value.trim();
     const bankAccount = merchantBank.value.trim();
     const settlementCycle = merchantCycle.value.trim();
@@ -284,6 +341,8 @@ async function loadMerchants() {
 /* ================= TRANSACTIONS ================= */
 
 async function createTransaction() {
+    if (!requireAdminAction("Transaction creation")) return;
+
     const cId = parseInt(customerId.value);
     const mId = parseInt(merchantId.value);
     const amt = parseFloat(amount.value);
@@ -335,6 +394,8 @@ async function loadTransactions() {
 /* ================= RECONCILIATION ================= */
 
 async function runReconciliation() {
+    if (!requireAdminAction("Reconciliation run")) return;
+
     const res = await fetch("/api/reconciliation/run", { method: "POST" });
     if (!res.ok) {
         const err = await readErrorMessage(res);
@@ -348,6 +409,8 @@ async function runReconciliation() {
 }
 
 async function retryException(transactionId) {
+    if (!requireAdminAction("Exception retry")) return;
+
     const res = await fetch(`/api/reconciliation/exceptions/${transactionId}/retry`, {
         method: "POST"
     });
@@ -362,6 +425,8 @@ async function retryException(transactionId) {
 }
 
 async function resolveException(transactionId) {
+    if (!requireAdminAction("Exception resolve")) return;
+
     const note = prompt("Resolution note (optional):", "");
     if (note === null) return;
 
@@ -390,14 +455,15 @@ async function loadExceptionQueue() {
     const data = await res.json();
     const table = document.getElementById("exceptionsTable");
     if (!table) return;
+    const isAdmin = isAdminUser();
 
     let html = `<tr>
         <th>Transaction</th><th>Amount</th><th>Status</th>
-        <th>Retry</th><th>Reason</th><th>Updated</th><th>Actions</th>
+        <th>Retry</th><th>Reason</th><th>Updated</th>${isAdmin ? "<th>Actions</th>" : ""}
     </tr>`;
 
     if (data.length === 0) {
-        html += `<tr><td colspan="7">No exceptions in queue.</td></tr>`;
+        html += `<tr><td colspan="${isAdmin ? 7 : 6}">No exceptions in queue.</td></tr>`;
         table.innerHTML = html;
         return;
     }
@@ -410,11 +476,16 @@ async function loadExceptionQueue() {
             <td class="status-${item.status.toLowerCase()}">${item.status}</td>
             <td>${item.retryCount} / ${item.maxRetries}</td>
             <td>${reason}</td>
-            <td>${item.reconciliationUpdatedAt || "-"}</td>
-            <td>
+            <td>${item.reconciliationUpdatedAt || "-"}</td>`;
+
+        if (isAdmin) {
+            html += `<td>
                 <button onclick="retryException(${item.transactionId})">Retry</button>
                 <button onclick="resolveException(${item.transactionId})">Resolve</button>
-            </td>
+            </td>`;
+        }
+
+        html += `
         </tr>`;
     });
 
@@ -450,6 +521,8 @@ async function loadLogs() {
 /* ================= TRIGGER ================= */
 
 async function triggerSettlement() {
+    if (!requireAdminAction("Settlement trigger")) return;
+
     if (!confirm("Trigger settlement now?")) return;
 
     // Fast polling while trigger is in flight lets the UI show lock acquire/release.
@@ -470,8 +543,24 @@ async function triggerSettlement() {
     refreshData();
 }
 
+async function logout() {
+    await fetch("/logout", { method: "POST" });
+    window.location.href = "/login?logout";
+}
+
 /* ================= INIT ================= */
 
-refreshData();
-startAutoRefresh();
-syncDashboardStatsRefresh();
+async function initializeApp() {
+    try {
+        await loadCurrentUser();
+        applyRoleAccess();
+        await refreshData();
+        startAutoRefresh();
+        syncDashboardStatsRefresh();
+    } catch (error) {
+        console.error("App initialization failed:", error);
+        alert("Unable to initialize the dashboard. Please refresh the page.");
+    }
+}
+
+initializeApp();

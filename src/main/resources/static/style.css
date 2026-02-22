@@ -19,6 +19,13 @@ body {
     flex-direction: column;
 }
 
+.auth-info {
+    margin: -10px 0 20px;
+    font-size: 12px;
+    color: #9ca3af;
+    line-height: 1.4;
+}
+
 .sidebar h2 {
     margin-bottom: 25px;
 }
@@ -36,6 +43,15 @@ body {
 
 .sidebar button:hover {
     background-color: #374151;
+}
+
+#logoutBtn {
+    margin-top: auto;
+    background-color: #374151;
+}
+
+#logoutBtn:hover {
+    background-color: #4b5563;
 }
 
 .main {
