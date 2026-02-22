@@ -1,63 +1,62 @@
-
 # Payment Settlement Engine
 
-Production-style settlement simulation built with Spring Boot, PostgreSQL, Redis, and Quartz.
-This project models real operational concerns: lock safety, idempotent triggers, retries, reconciliation, and role-based access.
+A production-grade settlement simulation focused on reliability, correctness, and operational safety across the full payment lifecycle.
+This is a systems-engineering project that emphasizes lock safety, idempotency, reconciliation, observability, and role-governed operations.
 
 ## Live Demo
 
-- URL: `https://settlement-engine-production.up.railway.app`
+- URL: https://settlement-engine-production.up.railway.app
 - Public demo (read-only):
-  - Username: `user`
-  - Password: `user123`
+  - Username: user
+  - Password: user123
 - Admin credentials are intentionally private.
 
-## What This Project Demonstrates
+## Operational Guarantees Implemented
 
-- End-to-end settlement lifecycle (`CAPTURED -> PROCESSING -> SETTLED/FAILED`)
-- Quartz scheduler (every 30 seconds) + manual trigger path
-- Redis lock to prevent concurrent settlement runners
-- Idempotent manual trigger behavior with `Idempotency-Key`
-- Retry accounting and settlement logging
-- Reconciliation and exception queue operations (`retry` / `resolve`)
-- Role-based access control across frontend and backend (`ADMIN`, `USER`)
+- Single-run settlement execution is enforced through Redis-based distributed locking.
+- Duplicate manual trigger requests are safely replayed via idempotency-key semantics.
+- Settlement processing follows deterministic lifecycle transitions with retry-bound failure handling.
+- Scheduler and manual trigger paths are coordinated to prevent overlapping execution windows.
+- Reconciliation state and exception workflows preserve operator-auditable outcomes.
+- Role-based access is enforced at both UI and API layers, with backend authorization as source of truth.
+- Runtime visibility is exposed through lock/run telemetry, queue depth, and status-level monitoring.
 
 ## Architecture
 
 ```text
-                +---------------------------+
-                |   Browser Dashboard UI    |
-                |  (HTML/CSS/Vanilla JS)    |
-                +-------------+-------------+
-                              |
-                              v
-                  +-----------+-----------+
-                  |   Spring Boot App     |
-                  |   REST + Security     |
-                  +-----------+-----------+
-                              |
-          +-------------------+-------------------+
-          |                   |                   |
-          v                   v                   v
- +--------+---------+ +-------+--------+ +--------+---------+
- | Settlement Core  | | Reconciliation | | Monitoring/API   |
- | + Idempotency    | | + Exception Q  | | lock/run stats   |
- +--------+---------+ +-------+--------+ +--------+---------+
-          |                   |                   |
-          +-------------------+-------------------+
-                              |
-               +--------------+---------------+
-               |                              |
-               v                              v
-      +--------+---------+           +--------+---------+
-      | PostgreSQL       |           | Redis            |
-      | customers/tx/log |           | distributed lock |
-      +------------------+           +------------------+
++-----------------------------+
+| Browser Dashboard (UI)      |
+| HTML / CSS / Vanilla JS     |
++--------------+--------------+
+               |
+               v
++--------------+--------------+
+| Spring Boot Application     |
+| REST APIs + Security Layer  |
++--------------+--------------+
+               |
+   +-----------+-----------+------------------+
+   |                       |                  |
+   v                       v                  v
++--+----------------+ +----+--------------+ +--+------------------+
+| Settlement Core   | | Reconciliation    | | Monitoring Service  |
+| Lock + Idempotency| | Exception Queue   | | Stats + Lock/Run    |
++--+----------------+ +----+--------------+ +--+------------------+
+   |                       |                  |
+   +-----------+-----------+------------------+
+               |
+       +-------+-------+
+       |               |
+       v               v
++------+-------+ +-----+------+
+| PostgreSQL   | | Redis      |
+| tx/log/state | | lock state |
++--------------+ +------------+
 
-                       +--------------------------+
-                       | Quartz Scheduler (30s)   |
-                       | triggers settlement job  |
-                       +--------------------------+
++-------------------------------+
+| Quartz Scheduler (every 30s)  |
+| triggers settlement execution |
++-------------------------------+
 ```
 
 ## State Machines
@@ -81,18 +80,18 @@ PENDING -> EXCEPTION_QUEUED -> RETRY -> PENDING
 
 ## Design Decisions
 
-- Redis lock for single-run safety:
-  - Prevents overlapping settlement execution when scheduler and manual trigger collide.
-- Server-side idempotency for manual triggers:
-  - Duplicate `Idempotency-Key` requests replay safe responses without duplicate processing.
-- Atomic status claim (`CAPTURED -> PROCESSING`) before settlement:
-  - Reduces race conditions and double-processing risk.
-- Reconciliation separated from settlement:
-  - Keeps operational exception handling explicit and auditable.
-- Role-based enforcement at both UI and API layers:
-  - UI hides admin actions; backend still enforces authorization (`403`) as source of truth.
-- Operational visibility first:
-  - Dashboard exposes lock lifecycle, run metadata, queue depth, and status counts.
+- Redis lock for execution safety:
+  - Prevents concurrent settlement runners when scheduler and manual triggers overlap.
+- Idempotency service for trigger path:
+  - Eliminates duplicate side-effects when clients retry the same operation.
+- Explicit processing claim (CAPTURED -> PROCESSING) before terminal transition:
+  - Reduces race risk and preserves traceable lifecycle progression.
+- Reconciliation decoupled from settlement execution:
+  - Keeps exception handling operationally explicit and auditable.
+- Dual-layer authorization model:
+  - UI hides privileged actions; backend authorization guarantees policy enforcement.
+- Operational telemetry first:
+  - Lock lifecycle and run metadata are surfaced to support production-style diagnosis.
 
 ## Tech Stack
 
@@ -160,46 +159,48 @@ export APP_USER_PASSWORD='<your-user-password>'
 
 ### 5. Open
 
-`http://localhost:8080`
+```bash
+http://localhost:8080
+```
 
 ## Roles and Access Model
 
-- `ADMIN`:
-  - Full read/write access
-  - Can create entities, trigger settlements, run reconciliation, retry/resolve exceptions
-- `USER`:
-  - Read-only dashboard/tables
-  - Write APIs blocked with `403`
+- ADMIN:
+  - Full read/write access.
+  - Can create entities, trigger settlement, run reconciliation, and perform exception actions.
+- USER:
+  - Read-only dashboard/tables.
+  - Write APIs are rejected with 403.
 
 Auth endpoints:
 
-- `GET /login`, `POST /login`
-- `POST /logout`
-- `GET /api/auth/me`
+- GET /login, POST /login
+- POST /logout
+- GET /api/auth/me
 
 ## API Summary
 
 - Customers:
-  - `GET /customers`
-  - `POST /customers` (`ADMIN`)
+  - GET /customers
+  - POST /customers (ADMIN)
 - Merchants:
-  - `GET /merchants`
-  - `POST /merchants` (`ADMIN`)
+  - GET /merchants
+  - POST /merchants (ADMIN)
 - Transactions:
-  - `GET /transactions`
-  - `POST /transactions?customerId={id}&merchantId={id}&amount={value}` (`ADMIN`)
+  - GET /transactions
+  - POST /transactions?customerId={id}&merchantId={id}&amount={value} (ADMIN)
 - Settlement:
-  - `POST /settlement/trigger` (`ADMIN`)
-  - Supports `Idempotency-Key` header
+  - POST /settlement/trigger (ADMIN)
+  - Supports Idempotency-Key header
 - Monitoring:
-  - `GET /api/settlements/stats`
+  - GET /api/settlements/stats
 - Logs:
-  - `GET /logs`
+  - GET /logs
 - Reconciliation:
-  - `GET /api/reconciliation/exceptions`
-  - `POST /api/reconciliation/run` (`ADMIN`)
-  - `POST /api/reconciliation/exceptions/{transactionId}/retry` (`ADMIN`)
-  - `POST /api/reconciliation/exceptions/{transactionId}/resolve` (`ADMIN`)
+  - GET /api/reconciliation/exceptions
+  - POST /api/reconciliation/run (ADMIN)
+  - POST /api/reconciliation/exceptions/{transactionId}/retry (ADMIN)
+  - POST /api/reconciliation/exceptions/{transactionId}/resolve (ADMIN)
 
 Resolve request body:
 
@@ -213,32 +214,32 @@ Resolve request body:
 
 | Variable | Purpose |
 |---|---|
-| `SPRING_DATASOURCE_URL` | PostgreSQL JDBC URL |
-| `SPRING_DATASOURCE_USERNAME` | DB username |
-| `SPRING_DATASOURCE_PASSWORD` | DB password |
-| `SPRING_DATA_REDIS_HOST` | Redis host |
-| `SPRING_DATA_REDIS_PORT` | Redis port |
-| `SPRING_DATA_REDIS_USERNAME` | Redis username (if required) |
-| `SPRING_DATA_REDIS_PASSWORD` | Redis password (if required) |
-| `PORT` | Server port (provided automatically on Railway) |
+| SPRING_DATASOURCE_URL | PostgreSQL JDBC URL |
+| SPRING_DATASOURCE_USERNAME | DB username |
+| SPRING_DATASOURCE_PASSWORD | DB password |
+| SPRING_DATA_REDIS_HOST | Redis host |
+| SPRING_DATA_REDIS_PORT | Redis port |
+| SPRING_DATA_REDIS_USERNAME | Redis username (if required) |
+| SPRING_DATA_REDIS_PASSWORD | Redis password (if required) |
+| PORT | Server port (provided automatically on Railway) |
 
 ### Security
 
 | Variable | Purpose |
 |---|---|
-| `APP_ADMIN_USERNAME` | Admin login username |
-| `APP_ADMIN_PASSWORD` | Admin login password |
-| `APP_USER_USERNAME` | User login username |
-| `APP_USER_PASSWORD` | User login password |
+| APP_ADMIN_USERNAME | Admin login username |
+| APP_ADMIN_PASSWORD | Admin login password |
+| APP_USER_USERNAME | User login username |
+| APP_USER_PASSWORD | User login password |
 
 ### Settlement and Idempotency
 
 | Variable | Default | Notes |
 |---|---|---|
-| `SETTLEMENT_OUTCOME_MODE` | `RANDOM` | `RANDOM`, `ALWAYS_SUCCESS`, `ALWAYS_FAIL` |
-| `SETTLEMENT_OUTCOME_RANDOM_SEED` | empty | Optional deterministic seed |
-| `SETTLEMENT_TRIGGER_IDEMPOTENCY_TTL_SECONDS` | `600` | Replay window for keys |
-| `SETTLEMENT_TRIGGER_IDEMPOTENCY_WAIT_TIMEOUT_MILLIS` | `5000` | Wait for in-flight duplicate key |
+| SETTLEMENT_OUTCOME_MODE | RANDOM | RANDOM, ALWAYS_SUCCESS, ALWAYS_FAIL |
+| SETTLEMENT_OUTCOME_RANDOM_SEED | empty | Optional deterministic seed |
+| SETTLEMENT_TRIGGER_IDEMPOTENCY_TTL_SECONDS | 600 | Replay window for keys |
+| SETTLEMENT_TRIGGER_IDEMPOTENCY_WAIT_TIMEOUT_MILLIS | 5000 | Wait for in-flight duplicate key |
 
 ## Testing and Validation
 
@@ -270,14 +271,37 @@ node scripts/role-validation.mjs
 
 ## Frontend Screenshots
 
-- Dashboard: `docs/screenshots/step1_homepage.png`
-- Customer creation: `docs/screenshots/step2_customer_created.png`
-- Merchant creation: `docs/screenshots/step3_merchant_created.png`
-- Transaction captured: `docs/screenshots/step4_transaction_captured.png`
-- Transaction settled: `docs/screenshots/step5_transaction_settled.png`
-- Lock status: `docs/screenshots/step6_lock_status.png`
-- Settlement logs: `docs/screenshots/step7_logs.png`
-- Idempotency: `docs/screenshots/step8_idempotency.png`
+### Dashboard
+
+![Dashboard](docs/screenshots/step1_homepage.png)
+
+### Customer Creation
+
+![Customer Creation](docs/screenshots/step2_customer_created.png)
+
+### Merchant Creation
+
+![Merchant Creation](docs/screenshots/step3_merchant_created.png)
+
+### Transaction Captured
+
+![Transaction Captured](docs/screenshots/step4_transaction_captured.png)
+
+### Transaction Settled
+
+![Transaction Settled](docs/screenshots/step5_transaction_settled.png)
+
+### Lock Status
+
+![Lock Status](docs/screenshots/step6_lock_status.png)
+
+### Settlement Logs
+
+![Settlement Logs](docs/screenshots/step7_logs.png)
+
+### Idempotency
+
+![Idempotency](docs/screenshots/step8_idempotency.png)
 
 ## Deployment (Railway)
 
@@ -288,36 +312,33 @@ Required managed services:
 
 Required app variables:
 
-- `SPRING_DATASOURCE_URL`
-- `SPRING_DATASOURCE_USERNAME`
-- `SPRING_DATASOURCE_PASSWORD`
-- `SPRING_DATA_REDIS_HOST`
-- `SPRING_DATA_REDIS_PORT`
-- `SPRING_DATA_REDIS_USERNAME`
-- `SPRING_DATA_REDIS_PASSWORD`
-- `APP_ADMIN_USERNAME`
-- `APP_ADMIN_PASSWORD`
-- `APP_USER_USERNAME`
-- `APP_USER_PASSWORD`
+- SPRING_DATASOURCE_URL
+- SPRING_DATASOURCE_USERNAME
+- SPRING_DATASOURCE_PASSWORD
+- SPRING_DATA_REDIS_HOST
+- SPRING_DATA_REDIS_PORT
+- SPRING_DATA_REDIS_USERNAME
+- SPRING_DATA_REDIS_PASSWORD
+- APP_ADMIN_USERNAME
+- APP_ADMIN_PASSWORD
+- APP_USER_USERNAME
+- APP_USER_PASSWORD
 
-## Future Improvements
+## Future Enhancements
 
-- Replace in-memory auth with JWT/OAuth2 + persistent user store
-- Add API versioning and OpenAPI spec publication
-- Add transaction outbox/event streaming for async settlement workflows
-- Add metrics + tracing (Micrometer + Prometheus + OpenTelemetry)
-- Add dead-letter handling and backoff policies for failed jobs
-- Add multi-instance test profile to validate lock behavior under load
-- Expand CI pipeline with automated Playwright + contract tests
+- Adopt the Transactional Outbox pattern for reliable event publication and downstream settlement notifications.
+- Add multi-instance load test harness to validate distributed lock correctness under contention and failover.
+- Introduce full observability stack (Micrometer metrics, Prometheus, Grafana, OpenTelemetry traces).
+- Evolve authentication from in-memory users to persistent identity with JWT/OAuth2 and fine-grained RBAC.
+- Add resilient job execution policies (dead-letter channel, exponential backoff, replay controls).
+- Publish OpenAPI contracts and enforce backward-compatible API versioning strategy.
+- Extend CI with integration matrices (DB/Redis profiles) and deterministic E2E verification gates.
 
 ## Troubleshooting
 
 - Reconciliation errors:
   - Validate Redis and datasource connectivity.
 - Logout appears stale after deploy:
-  - Hard refresh (`Cmd + Shift + R`) to reload static assets.
+  - Hard refresh static assets (Cmd + Shift + R).
 - Railway startup failures:
-  - Usually missing `SPRING_DATASOURCE_*`, `SPRING_DATA_REDIS_*`, or auth vars.
-
----
-If you are reviewing this project as an employer/recruiter, use the live demo and the role-based E2E script to verify behavior quickly.
+  - Usually caused by missing SPRING_DATASOURCE_*, SPRING_DATA_REDIS_*, or auth vars.
