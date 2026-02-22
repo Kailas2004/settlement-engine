@@ -1,42 +1,66 @@
+
 # Payment Settlement Engine
 
-Payment Settlement Engine is a Spring Boot project that simulates a real settlement lifecycle:
+Production-style settlement simulation built with Spring Boot, PostgreSQL, Redis, and Quartz.
+This project models real operational concerns: lock safety, idempotent triggers, retries, reconciliation, and role-based access.
 
-- payment capture
-- scheduled/manual settlement execution
-- distributed lock protection
-- retry and failure handling
-- reconciliation and exception queue workflows
-- role-based operational dashboard
+## Live Demo
 
-It is designed as a portfolio-quality backend + frontend system that demonstrates reliability and operational behavior, not just CRUD APIs.
+- URL: `https://settlement-engine-production.up.railway.app`
+- Public demo (read-only):
+  - Username: `user`
+  - Password: `user123`
+- Admin credentials are intentionally private.
 
-## Why This Project
+## What This Project Demonstrates
 
-Modern payment systems need strong guarantees:
+- End-to-end settlement lifecycle (`CAPTURED -> PROCESSING -> SETTLED/FAILED`)
+- Quartz scheduler (every 30 seconds) + manual trigger path
+- Redis lock to prevent concurrent settlement runners
+- Idempotent manual trigger behavior with `Idempotency-Key`
+- Retry accounting and settlement logging
+- Reconciliation and exception queue operations (`retry` / `resolve`)
+- Role-based access control across frontend and backend (`ADMIN`, `USER`)
 
-- avoid duplicate settlement runs
-- recover safely from partial processing
-- support idempotent external triggers
-- provide observability for operators
-- enforce role-based access control
+## Architecture
 
-This project implements those concerns end-to-end with a browser UI and API surface.
+```text
+                +---------------------------+
+                |   Browser Dashboard UI    |
+                |  (HTML/CSS/Vanilla JS)    |
+                +-------------+-------------+
+                              |
+                              v
+                  +-----------+-----------+
+                  |   Spring Boot App     |
+                  |   REST + Security     |
+                  +-----------+-----------+
+                              |
+          +-------------------+-------------------+
+          |                   |                   |
+          v                   v                   v
+ +--------+---------+ +-------+--------+ +--------+---------+
+ | Settlement Core  | | Reconciliation | | Monitoring/API   |
+ | + Idempotency    | | + Exception Q  | | lock/run stats   |
+ +--------+---------+ +-------+--------+ +--------+---------+
+          |                   |                   |
+          +-------------------+-------------------+
+                              |
+               +--------------+---------------+
+               |                              |
+               v                              v
+      +--------+---------+           +--------+---------+
+      | PostgreSQL       |           | Redis            |
+      | customers/tx/log |           | distributed lock |
+      +------------------+           +------------------+
 
-## Core Features
+                       +--------------------------+
+                       | Quartz Scheduler (30s)   |
+                       | triggers settlement job  |
+                       +--------------------------+
+```
 
-- Customer and merchant onboarding
-- Transaction creation in `CAPTURED` state
-- Quartz-driven settlement scheduler (every 30 seconds)
-- Manual settlement trigger API/UI
-- Redis lock to guarantee a single active settlement runner
-- Idempotent trigger behavior with `Idempotency-Key`
-- Settlement logging per attempt
-- Reconciliation pipeline with `PENDING`, `MATCHED`, `EXCEPTION_QUEUED`, `RESOLVED`
-- Exception queue actions: retry and resolve
-- Spring Security with `ADMIN` and `USER` roles
-
-## State Transitions
+## State Machines
 
 ### Settlement
 
@@ -55,6 +79,21 @@ PENDING -> EXCEPTION_QUEUED -> RESOLVED
 PENDING -> EXCEPTION_QUEUED -> RETRY -> PENDING
 ```
 
+## Design Decisions
+
+- Redis lock for single-run safety:
+  - Prevents overlapping settlement execution when scheduler and manual trigger collide.
+- Server-side idempotency for manual triggers:
+  - Duplicate `Idempotency-Key` requests replay safe responses without duplicate processing.
+- Atomic status claim (`CAPTURED -> PROCESSING`) before settlement:
+  - Reduces race conditions and double-processing risk.
+- Reconciliation separated from settlement:
+  - Keeps operational exception handling explicit and auditable.
+- Role-based enforcement at both UI and API layers:
+  - UI hides admin actions; backend still enforces authorization (`403`) as source of truth.
+- Operational visibility first:
+  - Dashboard exposes lock lifecycle, run metadata, queue depth, and status counts.
+
 ## Tech Stack
 
 - Java 17
@@ -63,9 +102,10 @@ PENDING -> EXCEPTION_QUEUED -> RETRY -> PENDING
 - PostgreSQL
 - Redis
 - Quartz Scheduler
-- Vanilla HTML/CSS/JS frontend
+- Spring Security
+- Vanilla HTML/CSS/JS
 - Maven
-- Playwright (E2E validation)
+- Playwright
 
 ## Repository Structure
 
@@ -74,18 +114,18 @@ src/main/java/com/kailas/settlementengine
   controller/      REST endpoints
   service/         settlement, lock, idempotency, reconciliation, monitoring
   scheduler/       Quartz config and job
-  entity/          domain models and enums
+  entity/          domain models/enums
   repository/      JPA repositories
   config/          Spring Security configuration
 
 src/main/resources/static
   index.html       dashboard shell
-  app.js           frontend behavior and API integration
-  style.css        UI styling
+  app.js           frontend behavior/API integration
+  style.css        styling
 
 scripts/
-  playwright-validate.mjs  core settlement E2E flow
-  role-validation.mjs      role-based admin/user E2E flow
+  playwright-validate.mjs  settlement integration E2E
+  role-validation.mjs      role-based E2E (ADMIN/USER)
 ```
 
 ## Quick Start
@@ -93,17 +133,17 @@ scripts/
 ### 1. Clone
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/Kailas2004/settlement-engine.git
 cd settlement-engine
 ```
 
-### 2. Start Dependencies (Postgres + Redis)
+### 2. Start Dependencies
 
 ```bash
 docker compose up -d postgres redis
 ```
 
-### 3. Configure Credentials (Recommended)
+### 3. Configure Auth Credentials
 
 ```bash
 export APP_ADMIN_USERNAME=admin
@@ -112,149 +152,103 @@ export APP_USER_USERNAME=user
 export APP_USER_PASSWORD='<your-user-password>'
 ```
 
-### 4. Run Application
+### 4. Run
 
 ```bash
 ./mvnw spring-boot:run
 ```
 
-### 5. Open Dashboard
+### 5. Open
 
-```text
-http://localhost:8080
-```
+`http://localhost:8080`
 
-Login with the credentials you set in step 3.
+## Roles and Access Model
 
-## Auth and Roles
-
-Two roles are supported:
-
-- `ADMIN`: full read/write access (create/trigger/reconcile/exception actions)
-- `USER`: read-only dashboards/tables; write APIs return `403`
-
-For public demo access, share only the `USER` account. Keep `ADMIN` credentials private.
+- `ADMIN`:
+  - Full read/write access
+  - Can create entities, trigger settlements, run reconciliation, retry/resolve exceptions
+- `USER`:
+  - Read-only dashboard/tables
+  - Write APIs blocked with `403`
 
 Auth endpoints:
 
-- login form: `GET /login`, `POST /login`
-- logout: `POST /logout`
-- current identity: `GET /api/auth/me`
-
-## Configuration
-
-All runtime values are environment-variable driven.
-
-### Core Runtime
-
-| Variable | Purpose |
-|---|---|
-| `SPRING_DATASOURCE_URL` | Database JDBC URL |
-| `SPRING_DATASOURCE_USERNAME` | Database username |
-| `SPRING_DATASOURCE_PASSWORD` | Database password |
-| `SPRING_DATA_REDIS_HOST` | Redis host |
-| `SPRING_DATA_REDIS_PORT` | Redis port |
-| `SPRING_DATA_REDIS_USERNAME` | Redis username (if required) |
-| `SPRING_DATA_REDIS_PASSWORD` | Redis password (if required) |
-| `PORT` | Runtime port (set automatically on Railway) |
-
-### Security
-
-| Variable | Purpose |
-|---|---|
-| `APP_ADMIN_USERNAME` | Admin username |
-| `APP_ADMIN_PASSWORD` | Admin password |
-| `APP_USER_USERNAME` | User username |
-| `APP_USER_PASSWORD` | User password |
-
-### Settlement Behavior
-
-| Variable | Default | Notes |
-|---|---|---|
-| `SETTLEMENT_OUTCOME_MODE` | `RANDOM` | `RANDOM`, `ALWAYS_SUCCESS`, `ALWAYS_FAIL` |
-| `SETTLEMENT_OUTCOME_RANDOM_SEED` | empty | Optional deterministic seed for `RANDOM` |
-| `SETTLEMENT_TRIGGER_IDEMPOTENCY_TTL_SECONDS` | `600` | Trigger replay window |
-| `SETTLEMENT_TRIGGER_IDEMPOTENCY_WAIT_TIMEOUT_MILLIS` | `5000` | Wait timeout for in-flight duplicate key |
+- `GET /login`, `POST /login`
+- `POST /logout`
+- `GET /api/auth/me`
 
 ## API Summary
 
-### Customers
+- Customers:
+  - `GET /customers`
+  - `POST /customers` (`ADMIN`)
+- Merchants:
+  - `GET /merchants`
+  - `POST /merchants` (`ADMIN`)
+- Transactions:
+  - `GET /transactions`
+  - `POST /transactions?customerId={id}&merchantId={id}&amount={value}` (`ADMIN`)
+- Settlement:
+  - `POST /settlement/trigger` (`ADMIN`)
+  - Supports `Idempotency-Key` header
+- Monitoring:
+  - `GET /api/settlements/stats`
+- Logs:
+  - `GET /logs`
+- Reconciliation:
+  - `GET /api/reconciliation/exceptions`
+  - `POST /api/reconciliation/run` (`ADMIN`)
+  - `POST /api/reconciliation/exceptions/{transactionId}/retry` (`ADMIN`)
+  - `POST /api/reconciliation/exceptions/{transactionId}/resolve` (`ADMIN`)
 
-- `GET /customers`
-- `POST /customers` (`ADMIN`)
-
-### Merchants
-
-- `GET /merchants`
-- `POST /merchants` (`ADMIN`)
-
-### Transactions
-
-- `GET /transactions`
-- `POST /transactions?customerId={id}&merchantId={id}&amount={value}` (`ADMIN`)
-
-### Settlement
-
-- `POST /settlement/trigger` (`ADMIN`)
-- Optional request header: `Idempotency-Key: <value>`
-
-### Monitoring
-
-- `GET /api/settlements/stats`
-
-### Logs
-
-- `GET /logs`
-
-### Reconciliation
-
-- `GET /api/reconciliation/exceptions`
-- `POST /api/reconciliation/run` (`ADMIN`)
-- `POST /api/reconciliation/exceptions/{transactionId}/retry` (`ADMIN`)
-- `POST /api/reconciliation/exceptions/{transactionId}/resolve` (`ADMIN`)
-
-Resolve payload:
+Resolve request body:
 
 ```json
 { "note": "Manually verified and closed" }
 ```
 
-## Frontend Screens
+## Environment Variables
 
-### Dashboard
+### Core Runtime
 
-Live totals, lock state, queue state, and run metadata.
+| Variable | Purpose |
+|---|---|
+| `SPRING_DATASOURCE_URL` | PostgreSQL JDBC URL |
+| `SPRING_DATASOURCE_USERNAME` | DB username |
+| `SPRING_DATASOURCE_PASSWORD` | DB password |
+| `SPRING_DATA_REDIS_HOST` | Redis host |
+| `SPRING_DATA_REDIS_PORT` | Redis port |
+| `SPRING_DATA_REDIS_USERNAME` | Redis username (if required) |
+| `SPRING_DATA_REDIS_PASSWORD` | Redis password (if required) |
+| `PORT` | Server port (provided automatically on Railway) |
 
-![Dashboard](docs/screenshots/step1_homepage.png)
+### Security
 
-### Customer and Merchant Management
+| Variable | Purpose |
+|---|---|
+| `APP_ADMIN_USERNAME` | Admin login username |
+| `APP_ADMIN_PASSWORD` | Admin login password |
+| `APP_USER_USERNAME` | User login username |
+| `APP_USER_PASSWORD` | User login password |
 
-![Customer](docs/screenshots/step2_customer_created.png)
-![Merchant](docs/screenshots/step3_merchant_created.png)
+### Settlement and Idempotency
 
-### Transaction Lifecycle
+| Variable | Default | Notes |
+|---|---|---|
+| `SETTLEMENT_OUTCOME_MODE` | `RANDOM` | `RANDOM`, `ALWAYS_SUCCESS`, `ALWAYS_FAIL` |
+| `SETTLEMENT_OUTCOME_RANDOM_SEED` | empty | Optional deterministic seed |
+| `SETTLEMENT_TRIGGER_IDEMPOTENCY_TTL_SECONDS` | `600` | Replay window for keys |
+| `SETTLEMENT_TRIGGER_IDEMPOTENCY_WAIT_TIMEOUT_MILLIS` | `5000` | Wait for in-flight duplicate key |
 
-![Transaction Captured](docs/screenshots/step4_transaction_captured.png)
-![Transaction Settled](docs/screenshots/step5_transaction_settled.png)
+## Testing and Validation
 
-### Lock and Audit
-
-![Lock Status](docs/screenshots/step6_lock_status.png)
-![Settlement Logs](docs/screenshots/step7_logs.png)
-
-### Idempotency
-
-![Idempotency](docs/screenshots/step8_idempotency.png)
-
-## Testing
-
-### Backend Unit/Integration Tests
+### Backend Tests
 
 ```bash
 ./mvnw test
 ```
 
-### Core Playwright E2E Flow
+### Core Settlement E2E
 
 ```bash
 npm install
@@ -263,7 +257,7 @@ SCREENSHOT_DIR=playwright-screenshots \
 node scripts/playwright-validate.mjs
 ```
 
-### Role-Based Playwright E2E Flow
+### Role-Based E2E
 
 ```bash
 BASE_URL=http://localhost:8080 \
@@ -274,22 +268,20 @@ USER_PASSWORD='<user-password>' \
 node scripts/role-validation.mjs
 ```
 
+## Frontend Screenshots
+
+- Dashboard: `docs/screenshots/step1_homepage.png`
+- Customer creation: `docs/screenshots/step2_customer_created.png`
+- Merchant creation: `docs/screenshots/step3_merchant_created.png`
+- Transaction captured: `docs/screenshots/step4_transaction_captured.png`
+- Transaction settled: `docs/screenshots/step5_transaction_settled.png`
+- Lock status: `docs/screenshots/step6_lock_status.png`
+- Settlement logs: `docs/screenshots/step7_logs.png`
+- Idempotency: `docs/screenshots/step8_idempotency.png`
+
 ## Deployment (Railway)
 
-Live app URL:
-
-- `https://settlement-engine-production.up.railway.app`
-
-### Public Demo Login (Read-Only)
-
-Use this account to explore the deployed dashboard safely:
-
-- Username: `user`
-- Password: `user123`
-
-Admin credentials are intentionally not documented in this README.
-
-Required services:
+Required managed services:
 
 - PostgreSQL
 - Redis
@@ -308,37 +300,24 @@ Required app variables:
 - `APP_USER_USERNAME`
 - `APP_USER_PASSWORD`
 
+## Future Improvements
+
+- Replace in-memory auth with JWT/OAuth2 + persistent user store
+- Add API versioning and OpenAPI spec publication
+- Add transaction outbox/event streaming for async settlement workflows
+- Add metrics + tracing (Micrometer + Prometheus + OpenTelemetry)
+- Add dead-letter handling and backoff policies for failed jobs
+- Add multi-instance test profile to validate lock behavior under load
+- Expand CI pipeline with automated Playwright + contract tests
+
 ## Troubleshooting
 
-### Reconciliation fails in UI
+- Reconciliation errors:
+  - Validate Redis and datasource connectivity.
+- Logout appears stale after deploy:
+  - Hard refresh (`Cmd + Shift + R`) to reload static assets.
+- Railway startup failures:
+  - Usually missing `SPRING_DATASOURCE_*`, `SPRING_DATA_REDIS_*`, or auth vars.
 
-Check:
-
-- backend logs for detailed error
-- Redis connectivity
-- datasource credentials
-
-### Logout page looks stale
-
-Hard refresh browser assets after deploy:
-
-- macOS: `Cmd + Shift + R`
-
-### App crashes on Railway startup
-
-Most common causes:
-
-- missing `SPRING_DATASOURCE_*`
-- missing `SPRING_DATA_REDIS_*`
-- missing `APP_ADMIN_PASSWORD` / `APP_USER_PASSWORD`
-
-## Current Status
-
-Working and validated end-to-end:
-
-- settlement processing and retries
-- distributed locking
-- idempotent trigger handling
-- reconciliation + exception queue
-- role-based frontend/backend access control
-- dashboard operational visibility
+---
+If you are reviewing this project as an employer/recruiter, use the live demo and the role-based E2E script to verify behavior quickly.
