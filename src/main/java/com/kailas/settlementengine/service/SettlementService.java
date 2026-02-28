@@ -7,6 +7,8 @@ import com.kailas.settlementengine.entity.TransactionStatus;
 import com.kailas.settlementengine.repository.SettlementLogRepository;
 import com.kailas.settlementengine.repository.TransactionRepository;
 import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -19,10 +21,14 @@ import java.util.List;
 @Service
 public class SettlementService {
 
+    private static final Logger log = LoggerFactory.getLogger(SettlementService.class);
+
     private final TransactionRepository transactionRepository;
     private final SettlementLogRepository settlementLogRepository;
     private final SettlementOutcomeDecider outcomeDecider;
     private final ReconciliationService reconciliationService;
+    private final SettlementMonitoringService monitoringService;
+    private final TransactionStateMachine transactionStateMachine;
     private final TransactionTemplate transactionTemplate;
     private final long manualProcessingVisibilityHoldMillis;
 
@@ -30,6 +36,8 @@ public class SettlementService {
                              SettlementLogRepository settlementLogRepository,
                              SettlementOutcomeDecider outcomeDecider,
                              ReconciliationService reconciliationService,
+                             SettlementMonitoringService monitoringService,
+                             TransactionStateMachine transactionStateMachine,
                              PlatformTransactionManager transactionManager,
                              @Value("${settlement.processing.visibility-hold-millis.manual:2500}")
                              long manualProcessingVisibilityHoldMillis) {
@@ -37,6 +45,8 @@ public class SettlementService {
         this.settlementLogRepository = settlementLogRepository;
         this.outcomeDecider = outcomeDecider;
         this.reconciliationService = reconciliationService;
+        this.monitoringService = monitoringService;
+        this.transactionStateMachine = transactionStateMachine;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.manualProcessingVisibilityHoldMillis = manualProcessingVisibilityHoldMillis;
     }
@@ -54,14 +64,19 @@ public class SettlementService {
                 transactionRepository.findByStatus(TransactionStatus.PROCESSING);
 
         for (Transaction transaction : processingTransactions) {
-            transaction.setStatus(TransactionStatus.CAPTURED);
+            transactionStateMachine.transition(
+                    transaction,
+                    TransactionStatus.CAPTURED,
+                    "startup-recovery"
+            );
             transactionRepository.save(transaction);
         }
 
         if (!processingTransactions.isEmpty()) {
-            System.out.println("Recovered "
-                    + processingTransactions.size()
-                    + " stuck PROCESSING transactions.");
+            log.info(
+                    "event=settlement_recovery recoveredProcessingCount={}",
+                    processingTransactions.size()
+            );
         }
     }
 
@@ -75,8 +90,11 @@ public class SettlementService {
 
     public long processSettlements(String triggerSource) {
 
-        System.out.println("Processing settlements on thread: "
-                + Thread.currentThread().getName());
+        log.info(
+                "event=settlement_run_started triggerSource={} thread={}",
+                triggerSource,
+                Thread.currentThread().getName()
+        );
 
         List<Transaction> transactions =
                 transactionRepository.findByStatus(TransactionStatus.CAPTURED);
@@ -84,7 +102,11 @@ public class SettlementService {
                 .map(Transaction::getId)
                 .toList();
 
-        System.out.println("Found " + capturedIds.size() + " CAPTURED transactions");
+        log.info(
+                "event=settlement_candidates_loaded triggerSource={} capturedCount={}",
+                triggerSource,
+                capturedIds.size()
+        );
 
         long processedCount = 0;
 
@@ -129,39 +151,53 @@ public class SettlementService {
 
         boolean success = outcomeDecider.shouldSucceed();
 
-        SettlementLog log = new SettlementLog();
-        log.setAttemptNumber(transaction.getRetryCount() + 1);
-        log.setTimestamp(LocalDateTime.now());
-        log.setTransaction(transaction);
+        SettlementLog settlementLog = new SettlementLog();
+        settlementLog.setAttemptNumber(transaction.getRetryCount() + 1);
+        settlementLog.setTimestamp(LocalDateTime.now());
+        settlementLog.setTransaction(transaction);
 
         if (success) {
-            transaction.setStatus(TransactionStatus.SETTLED);
+            transactionStateMachine.transition(
+                    transaction,
+                    TransactionStatus.SETTLED,
+                    "settlement-success"
+            );
             transaction.setSettledAt(LocalDateTime.now());
             transaction.setReconciliationStatus(ReconciliationStatus.PENDING);
             transaction.setExceptionReason(null);
             transaction.setReconciliationUpdatedAt(LocalDateTime.now());
 
-            log.setResult("SETTLED");
-            log.setMessage("Settlement successful");
+            settlementLog.setResult("SETTLED");
+            settlementLog.setMessage("Settlement successful");
 
-            System.out.println("Transaction "
-                    + transaction.getId()
-                    + " SETTLED");
+            monitoringService.recordTransactionSettled();
+            log.info("event=transaction_settled transactionId={}", transaction.getId());
         } else {
             transaction.setRetryCount(transaction.getRetryCount() + 1);
 
-            log.setResult("FAILED");
-            log.setMessage("Settlement failed");
+            settlementLog.setResult("FAILED");
+            settlementLog.setMessage("Settlement failed");
 
-            System.out.println("Transaction "
-                    + transaction.getId()
-                    + " FAILED attempt "
-                    + transaction.getRetryCount());
+            log.info(
+                    "event=transaction_failed_attempt transactionId={} attempt={}",
+                    transaction.getId(),
+                    transaction.getRetryCount()
+            );
 
             if (transaction.getRetryCount() >= transaction.getMaxRetries()) {
-                transaction.setStatus(TransactionStatus.FAILED);
+                transactionStateMachine.transition(
+                        transaction,
+                        TransactionStatus.FAILED,
+                        "max-retries-exhausted"
+                );
+                monitoringService.recordTransactionTerminalFailure();
             } else {
-                transaction.setStatus(TransactionStatus.CAPTURED);
+                transactionStateMachine.transition(
+                        transaction,
+                        TransactionStatus.CAPTURED,
+                        "retry-remaining"
+                );
+                monitoringService.recordTransactionRetried();
             }
 
             transaction.setReconciliationStatus(ReconciliationStatus.PENDING);
@@ -169,7 +205,7 @@ public class SettlementService {
             transaction.setReconciliationUpdatedAt(LocalDateTime.now());
         }
 
-        settlementLogRepository.save(log);
+        settlementLogRepository.save(settlementLog);
         transactionRepository.save(transaction);
         return true;
     }
@@ -187,6 +223,7 @@ public class SettlementService {
             Thread.sleep(manualProcessingVisibilityHoldMillis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            log.warn("event=settlement_visibility_hold_interrupted triggerSource={}", triggerSource);
         }
     }
 }

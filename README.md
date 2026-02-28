@@ -1,5 +1,10 @@
 # Settlement Engine
 
+[![Java 17](https://img.shields.io/badge/Java-17-2f5d95)](https://adoptium.net/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.2-6db33f)](https://spring.io/projects/spring-boot)
+[![Tests](https://img.shields.io/badge/tests-JUnit%20%2B%20Playwright-2a9d8f)](#testing)
+[![Coverage](https://img.shields.io/badge/coverage-JaCoCo%20(report)-457b9d)](#testing)
+
 A production-style payment settlement simulation focused on correctness, operational safety, and observability.
 
 The project demonstrates the full lifecycle of customer/merchant transactions with:
@@ -24,11 +29,13 @@ The implementation emphasizes these questions as first-class design concerns.
 - [Live Demo](#live-demo)
 - [UI Preview](#ui-preview)
 - [Engineering Invariants](#engineering-invariants)
+- [Formal State Model](#formal-state-model)
 - [System Architecture](#system-architecture)
 - [Core Execution Flows](#core-execution-flows)
 - [Data Model](#data-model)
 - [Design Decisions and Rationale](#design-decisions-and-rationale)
 - [Failure Modes and Handling](#failure-modes-and-handling)
+- [Telemetry and Logging](#telemetry-and-logging)
 - [API Summary](#api-summary)
 - [Local Development](#local-development)
 - [Deployment (Railway)](#deployment-railway)
@@ -82,6 +89,26 @@ Admin credentials are intentionally private.
   - RBAC is enforced on backend endpoints regardless of UI behavior.
 - **Auditable runtime state**
   - Lock lifecycle, run source, counts, and settlement logs are queryable in UI/API.
+
+## Formal State Model
+
+### Allowed Transaction Status Transitions
+
+| From | To | Trigger |
+|---|---|---|
+| `CAPTURED` | `PROCESSING` | Claim step before processing |
+| `PROCESSING` | `SETTLED` | Successful settlement attempt |
+| `PROCESSING` | `CAPTURED` | Failed attempt with retries remaining |
+| `PROCESSING` | `FAILED` | Failed attempt at max retries |
+| `FAILED` | `CAPTURED` | Operator retry from exception queue |
+
+Transitions outside this matrix are rejected by backend guard logic (`TransactionStateMachine`) with an `IllegalStateException`.
+
+### Illegal Transition Protection
+
+- Claiming is protected at DB level with conditional update (`WHERE status='CAPTURED'`).
+- Service-layer transitions are validated centrally before mutation.
+- Reconciliation retry moves `FAILED -> CAPTURED` through the same guard path.
 
 ## Tech Stack
 
@@ -274,6 +301,20 @@ erDiagram
 | Settlement fails after max retries | Transaction moves to `FAILED`, then reconciliation marks it `EXCEPTION_QUEUED` | Escalates to controlled operator workflow |
 | Unauthorized write attempt from USER role | Backend returns `403` | Security does not depend on frontend controls |
 
+## Telemetry and Logging
+
+Operational counters/timers are tracked in `SettlementMonitoringService` and surfaced via:
+- `GET /api/settlements/stats`
+
+Tracked telemetry includes:
+- Status counts: `captured`, `processing`, `settled`, `failed`, `exceptionQueued`
+- Run counters: `runCountTotal`, `runSuccessTotal`, `runFailureTotal`, `lockSkippedTotal`
+- Throughput/outcomes: `processedTransactionsTotal`, `settledTransactionsTotal`, `retriedTransactionsTotal`, `terminalFailedTransactionsTotal`
+- Timing: `lastRunDurationMillis`, `averageRunDurationMillis`
+- Lock lifecycle and latest run context (`lastLockAcquiredAt`, `lastLockReleasedAt`, `lastRunSource`, etc.)
+
+Logging is emitted via SLF4J using structured event keys (`event=...`) for lock lifecycle, run completion/failure, settlement attempts, and reconciliation actions.
+
 ## Scope and Non-Goals
 
 - This project models **settlement orchestration behavior**, not external processor integrations.
@@ -300,6 +341,7 @@ erDiagram
 
 - Custom sign-in page (`login.html`).
 - Responsive admin dashboard layout.
+- Dashboard status panel now includes run telemetry highlights (success/failure runs, lock skips, average run duration, terminal failures).
 - Table pagination is enabled across list pages with **max 10 rows per page**.
 - UI branding and role label adapt to current logged-in role.
 
@@ -415,6 +457,25 @@ http://localhost:8080
 ```bash
 ./mvnw test
 ```
+
+### Coverage Report (JaCoCo)
+
+```bash
+./mvnw verify
+```
+
+Report output:
+
+```text
+target/site/jacoco/index.html
+```
+
+### Test Focus Areas
+
+- Deterministic outcome behavior and invalid config handling
+- Reconciliation success/failure/resolve/retry paths (including negative assertions)
+- Idempotency semantics including concurrent same-key execution
+- Controller-level idempotent trigger behavior
 
 ### E2E Validation
 

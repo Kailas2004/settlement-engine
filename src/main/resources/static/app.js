@@ -185,6 +185,12 @@ function parseServerDateTime(value) {
     return Date.parse(normalized);
 }
 
+function formatDurationMillis(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return "-";
+    return `${Math.round(n)} ms`;
+}
+
 async function readErrorMessage(response) {
     try {
         const body = await response.text();
@@ -370,7 +376,34 @@ function updateAdvancedStats(stats) {
         html += `
             <div class="activity-item info">
                 <strong>Last Run: ${stats.lastRunTime}</strong>
-                <small>Processed: ${stats.lastProcessedCount || 0} | Source: ${stats.lastRunSource || "UNKNOWN"}</small>
+                <small>Processed: ${stats.lastProcessedCount || 0} | Source: ${stats.lastRunSource || "UNKNOWN"} | Duration: ${formatDurationMillis(stats.lastRunDurationMillis)}</small>
+            </div>`;
+    }
+
+    const hasTelemetry =
+        Object.prototype.hasOwnProperty.call(stats, "runSuccessTotal") ||
+        Object.prototype.hasOwnProperty.call(stats, "runFailureTotal") ||
+        Object.prototype.hasOwnProperty.call(stats, "lockSkippedTotal") ||
+        Object.prototype.hasOwnProperty.call(stats, "averageRunDurationMillis") ||
+        Object.prototype.hasOwnProperty.call(stats, "terminalFailedTransactionsTotal");
+
+    if (hasTelemetry) {
+        const runSuccessTotal = Number(stats.runSuccessTotal || 0);
+        const runFailureTotal = Number(stats.runFailureTotal || 0);
+        const lockSkippedTotal = Number(stats.lockSkippedTotal || 0);
+        const avgRunDuration = formatDurationMillis(stats.averageRunDurationMillis);
+        const terminalFailedTotal = Number(stats.terminalFailedTransactionsTotal || 0);
+        const hasErrors = runFailureTotal > 0 || terminalFailedTotal > 0 || Boolean(stats.lastRunError);
+        const telemetryClass = hasErrors ? "warn" : "info";
+
+        html += `
+            <div class="activity-item ${telemetryClass}">
+                <strong>Run Telemetry</strong>
+                <small>Runs: ${runSuccessTotal} success / ${runFailureTotal} failed</small>
+                <br>
+                <small>Lock Skips: ${lockSkippedTotal} | Avg Duration: ${avgRunDuration}</small>
+                <br>
+                <small>Terminal Failures: ${terminalFailedTotal}${stats.lastRunError ? ` | Last Error: ${stats.lastRunError}` : ""}</small>
             </div>`;
     }
 

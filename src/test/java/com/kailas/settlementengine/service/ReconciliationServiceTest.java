@@ -22,7 +22,10 @@ class ReconciliationServiceTest {
     void settledPendingTransactionShouldBeMarkedMatched() {
         InMemoryTransactionStore store = new InMemoryTransactionStore();
         TransactionRepository repository = store.asRepository();
-        ReconciliationService service = new ReconciliationService(repository);
+        ReconciliationService service = new ReconciliationService(
+                repository,
+                new TransactionStateMachine()
+        );
 
         Transaction transaction = createTransaction(TransactionStatus.SETTLED, ReconciliationStatus.PENDING);
         transaction.setSettledAt(LocalDateTime.now());
@@ -40,7 +43,10 @@ class ReconciliationServiceTest {
     void failedPendingTransactionShouldBeQueuedAsException() {
         InMemoryTransactionStore store = new InMemoryTransactionStore();
         TransactionRepository repository = store.asRepository();
-        ReconciliationService service = new ReconciliationService(repository);
+        ReconciliationService service = new ReconciliationService(
+                repository,
+                new TransactionStateMachine()
+        );
 
         Transaction transaction = createTransaction(TransactionStatus.FAILED, ReconciliationStatus.PENDING);
         repository.save(transaction);
@@ -57,7 +63,10 @@ class ReconciliationServiceTest {
     void retryExceptionShouldMoveFailedTransactionBackToCaptured() {
         InMemoryTransactionStore store = new InMemoryTransactionStore();
         TransactionRepository repository = store.asRepository();
-        ReconciliationService service = new ReconciliationService(repository);
+        ReconciliationService service = new ReconciliationService(
+                repository,
+                new TransactionStateMachine()
+        );
 
         Transaction transaction = createTransaction(TransactionStatus.FAILED, ReconciliationStatus.EXCEPTION_QUEUED);
         transaction.setExceptionReason("Settlement failed after max retries");
@@ -74,7 +83,10 @@ class ReconciliationServiceTest {
     void resolveExceptionShouldSetResolvedAndPersistNote() {
         InMemoryTransactionStore store = new InMemoryTransactionStore();
         TransactionRepository repository = store.asRepository();
-        ReconciliationService service = new ReconciliationService(repository);
+        ReconciliationService service = new ReconciliationService(
+                repository,
+                new TransactionStateMachine()
+        );
 
         Transaction transaction = createTransaction(TransactionStatus.FAILED, ReconciliationStatus.EXCEPTION_QUEUED);
         repository.save(transaction);
@@ -83,6 +95,43 @@ class ReconciliationServiceTest {
 
         assertEquals(ReconciliationStatus.RESOLVED, resolved.getReconciliationStatus());
         assertEquals("Handled manually", resolved.getExceptionReason());
+    }
+
+    @Test
+    void retryExceptionShouldFailWhenTransactionIsNotQueued() {
+        InMemoryTransactionStore store = new InMemoryTransactionStore();
+        TransactionRepository repository = store.asRepository();
+        ReconciliationService service = new ReconciliationService(
+                repository,
+                new TransactionStateMachine()
+        );
+
+        Transaction transaction = createTransaction(TransactionStatus.FAILED, ReconciliationStatus.PENDING);
+        repository.save(transaction);
+
+        IllegalStateException ex = assertThrows(
+                IllegalStateException.class,
+                () -> service.retryException(transaction.getId())
+        );
+
+        assertTrue(ex.getMessage().contains("not in exception queue"));
+    }
+
+    @Test
+    void resolveExceptionShouldFailWhenTransactionDoesNotExist() {
+        InMemoryTransactionStore store = new InMemoryTransactionStore();
+        TransactionRepository repository = store.asRepository();
+        ReconciliationService service = new ReconciliationService(
+                repository,
+                new TransactionStateMachine()
+        );
+
+        IllegalArgumentException ex = assertThrows(
+                IllegalArgumentException.class,
+                () -> service.resolveException(99999L, "note")
+        );
+
+        assertTrue(ex.getMessage().contains("Transaction not found"));
     }
 
     private Transaction createTransaction(TransactionStatus status, ReconciliationStatus reconciliationStatus) {

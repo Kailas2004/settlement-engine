@@ -1,5 +1,7 @@
 package com.kailas.settlementengine.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -9,6 +11,7 @@ import java.util.UUID;
 @Service
 public class RedisLockService {
 
+    private static final Logger log = LoggerFactory.getLogger(RedisLockService.class);
     private final StringRedisTemplate redisTemplate;
 
     private volatile String currentLockId = null;
@@ -24,7 +27,7 @@ public class RedisLockService {
 
         if (Boolean.TRUE.equals(success)) {
             currentLockId = INSTANCE_ID;
-            System.out.println("Lock acquired by instance: " + INSTANCE_ID);
+            log.info("event=lock_acquired instanceId={}", INSTANCE_ID);
             return INSTANCE_ID;
         }
 
@@ -37,7 +40,7 @@ public class RedisLockService {
         if (lockId != null && lockId.equals(value)) {
             redisTemplate.delete(key);
             currentLockId = null;
-            System.out.println("Lock released by instance: " + lockId);
+            log.info("event=lock_released instanceId={}", lockId);
         }
     }
 

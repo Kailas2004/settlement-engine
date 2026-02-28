@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 public class SettlementMonitoringService {
@@ -25,6 +26,18 @@ public class SettlementMonitoringService {
     private String lastLockHolder;
     private String lastLockSource;
     private String lastSkippedLockSource;
+    private Long lastRunDurationMillis;
+    private String lastRunError;
+
+    private final AtomicLong runCountTotal = new AtomicLong();
+    private final AtomicLong runSuccessTotal = new AtomicLong();
+    private final AtomicLong runFailureTotal = new AtomicLong();
+    private final AtomicLong lockSkippedTotal = new AtomicLong();
+    private final AtomicLong processedTransactionsTotal = new AtomicLong();
+    private final AtomicLong settledTransactionsTotal = new AtomicLong();
+    private final AtomicLong retriedTransactionsTotal = new AtomicLong();
+    private final AtomicLong terminalFailedTransactionsTotal = new AtomicLong();
+    private final AtomicLong cumulativeRunDurationMillis = new AtomicLong();
 
     private static final String LOCK_KEY = "settlement-lock";
 
@@ -73,6 +86,17 @@ public class SettlementMonitoringService {
         stats.put("lastLockHolder", lastLockHolder);
         stats.put("lastLockSource", lastLockSource);
         stats.put("lastSkippedLockSource", lastSkippedLockSource);
+        stats.put("lastRunDurationMillis", lastRunDurationMillis);
+        stats.put("lastRunError", lastRunError);
+        stats.put("runCountTotal", runCountTotal.get());
+        stats.put("runSuccessTotal", runSuccessTotal.get());
+        stats.put("runFailureTotal", runFailureTotal.get());
+        stats.put("lockSkippedTotal", lockSkippedTotal.get());
+        stats.put("processedTransactionsTotal", processedTransactionsTotal.get());
+        stats.put("settledTransactionsTotal", settledTransactionsTotal.get());
+        stats.put("retriedTransactionsTotal", retriedTransactionsTotal.get());
+        stats.put("terminalFailedTransactionsTotal", terminalFailedTransactionsTotal.get());
+        stats.put("averageRunDurationMillis", calculateAverageRunDurationMillis());
 
         return stats;
     }
@@ -82,9 +106,32 @@ public class SettlementMonitoringService {
     }
 
     public synchronized void recordLastRun(long processedCount, String source) {
+        recordLastRun(processedCount, source, 0L);
+    }
+
+    public synchronized void recordLastRun(long processedCount, String source, long durationMillis) {
         this.lastRunTime = LocalDateTime.now();
         this.lastProcessedCount = processedCount;
         this.lastRunSource = source;
+        this.lastRunDurationMillis = durationMillis;
+        this.lastRunError = null;
+
+        runCountTotal.incrementAndGet();
+        runSuccessTotal.incrementAndGet();
+        processedTransactionsTotal.addAndGet(processedCount);
+        cumulativeRunDurationMillis.addAndGet(Math.max(durationMillis, 0L));
+    }
+
+    public synchronized void recordRunFailed(String source, long durationMillis, Throwable error) {
+        this.lastRunTime = LocalDateTime.now();
+        this.lastProcessedCount = 0L;
+        this.lastRunSource = source;
+        this.lastRunDurationMillis = durationMillis;
+        this.lastRunError = error == null ? null : error.getClass().getSimpleName();
+
+        runCountTotal.incrementAndGet();
+        runFailureTotal.incrementAndGet();
+        cumulativeRunDurationMillis.addAndGet(Math.max(durationMillis, 0L));
     }
 
     public synchronized void recordLockAcquired(String lockHolder, String source) {
@@ -102,5 +149,26 @@ public class SettlementMonitoringService {
     public synchronized void recordLockSkipped(String source) {
         this.lastLockSkippedAt = LocalDateTime.now();
         this.lastSkippedLockSource = source;
+        lockSkippedTotal.incrementAndGet();
+    }
+
+    public void recordTransactionSettled() {
+        settledTransactionsTotal.incrementAndGet();
+    }
+
+    public void recordTransactionRetried() {
+        retriedTransactionsTotal.incrementAndGet();
+    }
+
+    public void recordTransactionTerminalFailure() {
+        terminalFailedTransactionsTotal.incrementAndGet();
+    }
+
+    private double calculateAverageRunDurationMillis() {
+        long runs = runCountTotal.get();
+        if (runs <= 0) {
+            return 0.0;
+        }
+        return (double) cumulativeRunDurationMillis.get() / runs;
     }
 }
