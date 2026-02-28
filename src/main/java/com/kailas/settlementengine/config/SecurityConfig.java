@@ -43,10 +43,12 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/login",
+                                "/login.html",
                                 "/error",
                                 "/favicon.ico",
                                 "/style.css",
-                                "/app.js"
+                                "/app.js",
+                                "/login.css"
                         ).permitAll()
                         .requestMatchers(HttpMethod.GET,
                                 "/",
@@ -70,11 +72,14 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .formLogin(form -> form
+                        .loginPage("/login.html")
+                        .loginProcessingUrl("/login")
+                        .failureUrl("/login.html?error")
                         .defaultSuccessUrl("/", true)
                         .permitAll()
                 )
                 .logout(logout -> logout
-                        .logoutSuccessUrl("/login")
+                        .logoutSuccessUrl("/login.html?logout")
                         .permitAll()
                 );
 

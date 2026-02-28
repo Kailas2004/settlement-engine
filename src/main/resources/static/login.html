@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settlement Engine Sign In</title>
+    <link rel="stylesheet" href="login.css">
+</head>
+<body>
+<main class="login-page">
+    <section class="login-shell">
+        <div class="brand">
+            <div class="brand-icon">SE</div>
+            <h1>Settlement Engine</h1>
+        </div>
+
+        <div class="card">
+            <h2>Sign In</h2>
+            <p class="subtitle">Enter your credentials to continue.</p>
+
+            <div id="loginMessage" class="message hidden"></div>
+
+            <form method="post" action="/login" class="login-form">
+                <label for="username">Username</label>
+                <input id="username" name="username" type="text" placeholder="Enter your username" required autofocus>
+
+                <label for="password">Password</label>
+                <input id="password" name="password" type="password" placeholder="Enter your password" required>
+
+                <button type="submit">Sign In</button>
+            </form>
+        </div>
+    </section>
+</main>
+
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const message = document.getElementById("loginMessage");
+    if (params.has("error")) {
+        message.classList.remove("hidden");
+        message.classList.add("error");
+        message.textContent = "Invalid username or password.";
+    } else if (params.has("logout")) {
+        message.classList.remove("hidden");
+        message.classList.add("success");
+        message.textContent = "You have been signed out.";
+    }
+</script>
+</body>
+</html>

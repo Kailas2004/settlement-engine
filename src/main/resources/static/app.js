@@ -8,6 +8,23 @@ let currentRoles = [];
 const GLOBAL_REFRESH_INTERVAL_MS = 10000;
 const DASHBOARD_STATS_INTERVAL_MS = 100;
 const LOCK_RECENTLY_ACTIVE_WINDOW_MS = 2000;
+const TABLE_PAGE_SIZE = 10;
+
+const tablePageState = {
+    customers: 1,
+    merchants: 1,
+    transactions: 1,
+    exceptions: 1,
+    logs: 1
+};
+
+const tableDataCache = {
+    customers: [],
+    merchants: [],
+    transactions: [],
+    exceptions: [],
+    logs: []
+};
 
 function hasRole(role) {
     return currentRoles.includes(role) || currentRoles.includes(`ROLE_${role}`);
@@ -29,9 +46,99 @@ function setElementVisible(id, visible) {
     el.style.display = visible ? "" : "none";
 }
 
+function getPaginatedSlice(tableKey, data) {
+    const totalItems = Array.isArray(data) ? data.length : 0;
+    const totalPages = Math.max(1, Math.ceil(totalItems / TABLE_PAGE_SIZE));
+    const currentPage = Math.min(
+        Math.max(tablePageState[tableKey] || 1, 1),
+        totalPages
+    );
+
+    tablePageState[tableKey] = currentPage;
+
+    const startIndex = (currentPage - 1) * TABLE_PAGE_SIZE;
+    const items = (data || []).slice(startIndex, startIndex + TABLE_PAGE_SIZE);
+    const endIndex = startIndex + items.length;
+
+    return {
+        items,
+        totalItems,
+        totalPages,
+        currentPage,
+        startIndex,
+        endIndex
+    };
+}
+
+function renderPagination(containerId, tableKey, pageInfo) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (!pageInfo || pageInfo.totalItems === 0) {
+        container.innerHTML = "";
+        return;
+    }
+
+    const { currentPage, totalPages, totalItems, startIndex, endIndex } = pageInfo;
+    const startDisplay = startIndex + 1;
+    const endDisplay = endIndex;
+    const prevDisabled = currentPage <= 1 ? "disabled" : "";
+    const nextDisabled = currentPage >= totalPages ? "disabled" : "";
+
+    container.innerHTML = `
+        <div class="pagination-inner">
+            <button class="page-btn" ${prevDisabled} onclick="setTablePage('${tableKey}', ${currentPage - 1})">Previous</button>
+            <span class="page-meta">Page ${currentPage} of ${totalPages}</span>
+            <span class="page-count">${startDisplay}-${endDisplay} of ${totalItems}</span>
+            <button class="page-btn" ${nextDisabled} onclick="setTablePage('${tableKey}', ${currentPage + 1})">Next</button>
+        </div>
+    `;
+}
+
+function setTablePage(tableKey, nextPage) {
+    tablePageState[tableKey] = nextPage;
+    renderTableByKey(tableKey);
+}
+
+function renderTableByKey(tableKey) {
+    switch (tableKey) {
+        case "customers":
+            renderCustomersTable();
+            break;
+        case "merchants":
+            renderMerchantsTable();
+            break;
+        case "transactions":
+            renderTransactionsTable();
+            break;
+        case "exceptions":
+            renderExceptionsTable();
+            break;
+        case "logs":
+            renderLogsTable();
+            break;
+        default:
+            break;
+    }
+}
+
 function showSection(id) {
     document.querySelectorAll(".section").forEach(s => s.classList.add("hidden"));
-    document.getElementById(id).classList.remove("hidden");
+
+    const section = document.getElementById(id);
+    if (section) {
+        section.classList.remove("hidden");
+    }
+
+    document.querySelectorAll(".menu-btn[data-section]").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.section === id);
+    });
+
+    const sectionTitle = document.getElementById("sectionTitle");
+    if (sectionTitle && section) {
+        sectionTitle.innerText = section.dataset.title || "Settlement Engine";
+    }
+
     syncDashboardStatsRefresh();
     refreshData();
 }
@@ -103,7 +210,7 @@ async function readErrorMessage(response) {
 async function loadCurrentUser() {
     const res = await fetch("/api/auth/me");
     if (res.status === 401 || res.status === 403) {
-        window.location.href = "/login";
+        window.location.href = "/login.html";
         return;
     }
     if (!res.ok) {
@@ -128,6 +235,11 @@ function applyRoleAccess() {
     if (authInfo) {
         const roleLabel = isAdmin ? "ADMIN" : "USER";
         authInfo.innerText = `${currentUser || "unknown"} (${roleLabel})`;
+    }
+
+    const brandRoleLabel = document.getElementById("brandRoleLabel");
+    if (brandRoleLabel) {
+        brandRoleLabel.innerText = isAdmin ? "System Admin" : "System User";
     }
 }
 
@@ -156,15 +268,47 @@ async function loadStats() {
 
     const s = await res.json();
 
-    totalCard.innerHTML = `<h3>Total</h3><p>${s.totalTransactions}</p>`;
-    capturedCard.innerHTML = `<h3>Captured</h3><p>${s.captured}</p>`;
-    processingCard.innerHTML = `<h3>Processing</h3><p>${s.processing}</p>`;
-    settledCard.innerHTML = `<h3>Settled</h3><p>${s.settled}</p>`;
-    failedCard.innerHTML = `<h3>Failed</h3><p>${s.failed}</p>`;
-    exceptionCard.innerHTML = `<h3>Exceptions</h3><p>${s.exceptionQueued || 0}</p>`;
-    retryCard.innerHTML = `<h3>Avg Retry</h3><p>${Number(s.averageRetryCount).toFixed(2)}</p>`;
+    renderMetricCard(totalCard, "Total", Number(s.totalTransactions || 0).toLocaleString(), "total");
+    renderMetricCard(capturedCard, "Captured", Number(s.captured || 0).toLocaleString(), "captured");
+    renderMetricCard(processingCard, "Processing", Number(s.processing || 0).toLocaleString(), "processing");
+    renderMetricCard(settledCard, "Settled", Number(s.settled || 0).toLocaleString(), "settled");
+    renderMetricCard(failedCard, "Failed", Number(s.failed || 0).toLocaleString(), "failed");
+    renderMetricCard(exceptionCard, "Exceptions", Number(s.exceptionQueued || 0).toLocaleString(), "exceptions");
+    renderMetricCard(retryCard, "Avg Retry", Number(s.averageRetryCount).toFixed(2), "retry");
 
     updateAdvancedStats(s);
+}
+
+function renderMetricCard(cardEl, title, value, iconType) {
+    if (!cardEl) return;
+    cardEl.innerHTML = `
+        <div class="card-head">
+            <h3>${title}</h3>
+            <span class="card-icon card-icon-${iconType}" aria-hidden="true">${metricIconSvg(iconType)}</span>
+        </div>
+        <p>${value}</p>
+    `;
+}
+
+function metricIconSvg(iconType) {
+    switch (iconType) {
+        case "total":
+            return `<svg viewBox="0 0 24 24"><path d="M5 19H19"/><path d="M8 16V10"/><path d="M12 16V7"/><path d="M16 16V12"/></svg>`;
+        case "captured":
+            return `<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10H21"/><path d="M7 14H10"/></svg>`;
+        case "processing":
+            return `<svg viewBox="0 0 24 24"><path d="M13 3L6 14H12L11 21L18 10H12L13 3Z"/></svg>`;
+        case "settled":
+            return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12L11 15L16 9"/></svg>`;
+        case "failed":
+            return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8V12"/><path d="M12 16H12.01"/></svg>`;
+        case "exceptions":
+            return `<svg viewBox="0 0 24 24"><path d="M12 3L22 21H2L12 3Z"/><path d="M12 9V13"/><path d="M12 17H12.01"/></svg>`;
+        case "retry":
+            return `<svg viewBox="0 0 24 24"><path d="M20 11A8 8 0 1 1 12 4"/><path d="M20 4V11H13"/></svg>`;
+        default:
+            return "";
+    }
 }
 
 function updateAdvancedStats(stats) {
@@ -190,59 +334,58 @@ function updateAdvancedStats(stats) {
     // Lock status
     if (showActiveLock) {
         html += `
-            <div style="padding:10px;margin-bottom:8px;background:#fff3cd;color:#856404;border-radius:8px;">
-                🔒 ${stats.lockHeld ? "Redis Lock Active" : "Redis Lock Recently Active"}
-                <br>
+            <div class="activity-item warn">
+                <strong>${stats.lockHeld ? "Redis Lock Active" : "Redis Lock Recently Active"}</strong>
                 <small>Holder: ${stats.lockHolder || stats.lastLockHolder || "Unknown"}</small>
             </div>`;
     } else {
         html += `
-            <div style="padding:10px;margin-bottom:8px;background:#e6fffa;color:#065f46;border-radius:8px;">
-                🔓 No Lock Held
+            <div class="activity-item success">
+                <strong>No Lock Held</strong>
             </div>`;
     }
 
     // Settlement queue state
     if (stats.processing > 0) {
         html += `
-            <div style="padding:10px;margin-bottom:8px;background:#fff3cd;color:#856404;border-radius:8px;">
-                ⏳ Settlement Running — ${stats.processing} processing
+            <div class="activity-item warn">
+                <strong>Settlement Running</strong>
+                <small>${stats.processing} transaction(s) currently processing.</small>
             </div>`;
     } else if (stats.captured > 0) {
         html += `
-            <div style="padding:10px;margin-bottom:8px;background:#fffbeb;color:#92400e;border-radius:8px;">
-                🧾 Pending Settlements — ${stats.captured} captured
+            <div class="activity-item warn">
+                <strong>Pending Settlements</strong>
+                <small>${stats.captured} captured transaction(s) waiting.</small>
             </div>`;
     } else {
         html += `
-            <div style="padding:10px;margin-bottom:8px;background:#e6fffa;color:#065f46;border-radius:8px;">
-                ✅ No Active or Pending Settlements
+            <div class="activity-item success">
+                <strong>No Active or Pending Settlements</strong>
             </div>`;
     }
 
     // Last run info
     if (stats.lastRunTime) {
         html += `
-            <div style="padding:10px;background:#f0f9ff;color:#1e3a8a;border-radius:8px;">
-                🕒 Last Run: ${stats.lastRunTime}
-                <br>
-                📦 Processed: ${stats.lastProcessedCount || 0}
-                <br>
-                <small>Source: ${stats.lastRunSource || "UNKNOWN"}</small>
+            <div class="activity-item info">
+                <strong>Last Run: ${stats.lastRunTime}</strong>
+                <small>Processed: ${stats.lastProcessedCount || 0} | Source: ${stats.lastRunSource || "UNKNOWN"}</small>
             </div>`;
     }
 
     // Recent lock lifecycle details
     if (stats.lastLockAcquiredAt || stats.lastLockReleasedAt || stats.lastLockSkippedAt) {
         html += `
-            <div style="padding:10px;margin-top:8px;background:#f8fafc;color:#334155;border-radius:8px;">
-                🔐 Last Lock Acquired: ${stats.lastLockAcquiredAt || "-"}
+            <div class="activity-item neutral">
+                <strong>Lock Lifecycle</strong>
+                <small>Acquired: ${stats.lastLockAcquiredAt || "-"}</small>
                 <br>
-                🔓 Last Lock Released: ${stats.lastLockReleasedAt || "-"}
+                <small>Released: ${stats.lastLockReleasedAt || "-"}</small>
                 <br>
                 <small>Source: ${stats.lastLockSource || "UNKNOWN"}</small>
                 <br>
-                <small>Last Skipped Trigger: ${stats.lastLockSkippedAt || "-"}</small>
+                <small>Skipped Trigger: ${stats.lastLockSkippedAt || "-"}</small>
                 <br>
                 <small>Skipped Source: ${stats.lastSkippedLockSource || "-"}</small>
             </div>`;
@@ -280,10 +423,22 @@ async function loadCustomers() {
     const res = await fetch("/customers");
     if (!res.ok) return;
 
-    const data = await res.json();
+    tableDataCache.customers = await res.json();
+    renderCustomersTable();
+}
 
+function renderCustomersTable() {
+    const table = document.getElementById("customersTable");
+    if (!table) return;
+
+    const pageInfo = getPaginatedSlice("customers", tableDataCache.customers);
     let html = `<tr><th>ID</th><th>Name</th><th>Email</th></tr>`;
-    data.forEach(c => {
+
+    if (pageInfo.items.length === 0) {
+        html += `<tr><td colspan="3">No customers found.</td></tr>`;
+    }
+
+    pageInfo.items.forEach(c => {
         html += `<tr>
             <td>${c.id}</td>
             <td>${c.name}</td>
@@ -291,7 +446,8 @@ async function loadCustomers() {
         </tr>`;
     });
 
-    customersTable.innerHTML = html;
+    table.innerHTML = html;
+    renderPagination("customersPagination", "customers", pageInfo);
 }
 
 /* ================= MERCHANTS ================= */
@@ -317,7 +473,7 @@ async function createMerchant() {
 
     merchantName.value = "";
     merchantBank.value = "";
-    merchantCycle.value = "";
+    merchantCycle.value = "DAILY";
     loadMerchants();
 }
 
@@ -325,10 +481,22 @@ async function loadMerchants() {
     const res = await fetch("/merchants");
     if (!res.ok) return;
 
-    const data = await res.json();
+    tableDataCache.merchants = await res.json();
+    renderMerchantsTable();
+}
 
+function renderMerchantsTable() {
+    const table = document.getElementById("merchantsTable");
+    if (!table) return;
+
+    const pageInfo = getPaginatedSlice("merchants", tableDataCache.merchants);
     let html = `<tr><th>ID</th><th>Name</th><th>Bank</th><th>Cycle</th></tr>`;
-    data.forEach(m => {
+
+    if (pageInfo.items.length === 0) {
+        html += `<tr><td colspan="4">No merchants found.</td></tr>`;
+    }
+
+    pageInfo.items.forEach(m => {
         html += `<tr>
             <td>${m.id}</td>
             <td>${m.name}</td>
@@ -337,7 +505,8 @@ async function loadMerchants() {
         </tr>`;
     });
 
-    merchantsTable.innerHTML = html;
+    table.innerHTML = html;
+    renderPagination("merchantsPagination", "merchants", pageInfo);
 }
 
 /* ================= TRANSACTIONS ================= */
@@ -373,14 +542,25 @@ async function loadTransactions() {
     const res = await fetch("/transactions");
     if (!res.ok) return;
 
-    const data = await res.json();
+    tableDataCache.transactions = await res.json();
+    renderTransactionsTable();
+}
 
+function renderTransactionsTable() {
+    const table = document.getElementById("transactionsTable");
+    if (!table) return;
+
+    const pageInfo = getPaginatedSlice("transactions", tableDataCache.transactions);
     let html = `<tr>
         <th>ID</th><th>Amount</th><th>Status</th>
         <th>Retry</th><th>Created</th>
     </tr>`;
 
-    data.forEach(t => {
+    if (pageInfo.items.length === 0) {
+        html += `<tr><td colspan="5">No transactions found.</td></tr>`;
+    }
+
+    pageInfo.items.forEach(t => {
         html += `<tr>
             <td>${t.id}</td>
             <td>${t.amount}</td>
@@ -390,7 +570,8 @@ async function loadTransactions() {
         </tr>`;
     });
 
-    transactionsTable.innerHTML = html;
+    table.innerHTML = html;
+    renderPagination("transactionsPagination", "transactions", pageInfo);
 }
 
 /* ================= RECONCILIATION ================= */
@@ -454,9 +635,15 @@ async function loadExceptionQueue() {
         return;
     }
 
-    const data = await res.json();
+    tableDataCache.exceptions = await res.json();
+    renderExceptionsTable();
+}
+
+function renderExceptionsTable() {
     const table = document.getElementById("exceptionsTable");
     if (!table) return;
+
+    const pageInfo = getPaginatedSlice("exceptions", tableDataCache.exceptions);
     const isAdmin = isAdminUser();
 
     let html = `<tr>
@@ -464,13 +651,14 @@ async function loadExceptionQueue() {
         <th>Retry</th><th>Reason</th><th>Updated</th>${isAdmin ? "<th>Actions</th>" : ""}
     </tr>`;
 
-    if (data.length === 0) {
+    if (pageInfo.items.length === 0) {
         html += `<tr><td colspan="${isAdmin ? 7 : 6}">No exceptions in queue.</td></tr>`;
         table.innerHTML = html;
+        renderPagination("exceptionsPagination", "exceptions", pageInfo);
         return;
     }
 
-    data.forEach(item => {
+    pageInfo.items.forEach(item => {
         const reason = item.exceptionReason || "-";
         html += `<tr>
             <td>${item.transactionId}</td>
@@ -492,6 +680,7 @@ async function loadExceptionQueue() {
     });
 
     table.innerHTML = html;
+    renderPagination("exceptionsPagination", "exceptions", pageInfo);
 }
 
 /* ================= LOGS ================= */
@@ -500,14 +689,25 @@ async function loadLogs() {
     const res = await fetch("/logs");
     if (!res.ok) return;
 
-    const data = await res.json();
+    tableDataCache.logs = await res.json();
+    renderLogsTable();
+}
 
+function renderLogsTable() {
+    const table = document.getElementById("logsTable");
+    if (!table) return;
+
+    const pageInfo = getPaginatedSlice("logs", tableDataCache.logs);
     let html = `<tr>
         <th>ID</th><th>Transaction</th>
         <th>Attempt</th><th>Result</th><th>Message</th>
     </tr>`;
 
-    data.forEach(l => {
+    if (pageInfo.items.length === 0) {
+        html += `<tr><td colspan="5">No settlement logs found.</td></tr>`;
+    }
+
+    pageInfo.items.forEach(l => {
         html += `<tr>
             <td>${l.id}</td>
             <td>${l.transactionId || "-"}</td>
@@ -517,7 +717,8 @@ async function loadLogs() {
         </tr>`;
     });
 
-    logsTable.innerHTML = html;
+    table.innerHTML = html;
+    renderPagination("logsPagination", "logs", pageInfo);
 }
 
 /* ================= TRIGGER ================= */

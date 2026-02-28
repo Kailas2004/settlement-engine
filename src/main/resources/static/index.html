@@ -1,33 +1,118 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settlement Engine Admin</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<div class="container">
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                    <path d="M3 10L12 5L21 10" />
+                    <path d="M5 10V18" />
+                    <path d="M9 10V18" />
+                    <path d="M15 10V18" />
+                    <path d="M19 10V18" />
+                    <path d="M3 19H21" />
+                </svg>
+            </div>
+            <div class="brand-copy">
+                <h2>Settlement</h2>
+                <p id="brandRoleLabel">System Admin</p>
+            </div>
+        </div>
 
-    <div class="sidebar">
-        <h2>Settlement Engine</h2>
         <p id="authInfo" class="auth-info"></p>
-        <button onclick="showSection('dashboard')">Dashboard</button>
-        <button onclick="showSection('customers')">Customers</button>
-        <button onclick="showSection('merchants')">Merchants</button>
-        <button onclick="showSection('transactions')">Transactions</button>
-        <button onclick="showSection('reconciliation')">Reconciliation</button>
-        <button onclick="showSection('logs')">Settlement Logs</button>
-        <button id="triggerSettlementBtn" onclick="triggerSettlement()">Trigger Settlement</button>
-        <button id="logoutBtn" onclick="logout()">Logout</button>
-    </div>
 
-    <div class="main">
+        <nav class="menu">
+            <button class="menu-btn active" data-section="dashboard" onclick="showSection('dashboard')">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <rect x="4" y="4" width="7" height="7" rx="1.5" />
+                        <rect x="13" y="4" width="7" height="7" rx="1.5" />
+                        <rect x="4" y="13" width="7" height="7" rx="1.5" />
+                        <rect x="13" y="13" width="7" height="7" rx="1.5" />
+                    </svg>
+                </span><span>Dashboard</span>
+            </button>
+            <button class="menu-btn" data-section="customers" onclick="showSection('customers')">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <circle cx="9" cy="9" r="3" />
+                        <circle cx="17" cy="10" r="2.5" />
+                        <path d="M4 19C4 16.2 6.2 14 9 14C11.8 14 14 16.2 14 19" />
+                        <path d="M14.5 19C14.7 17.3 15.9 15.8 17.5 15.2" />
+                    </svg>
+                </span><span>Customers</span>
+            </button>
+            <button class="menu-btn" data-section="merchants" onclick="showSection('merchants')">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M4 8L5.2 4H18.8L20 8V10C20 11.1 19.1 12 18 12C16.9 12 16 11.1 16 10C16 11.1 15.1 12 14 12C12.9 12 12 11.1 12 10C12 11.1 11.1 12 10 12C8.9 12 8 11.1 8 10C8 11.1 7.1 12 6 12C4.9 12 4 11.1 4 10V8Z" />
+                        <path d="M6 12V20H18V12" />
+                        <path d="M10 16H14" />
+                    </svg>
+                </span><span>Merchants</span>
+            </button>
+            <button class="menu-btn" data-section="transactions" onclick="showSection('transactions')">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M7 7H20" />
+                        <path d="M15 3L20 7L15 11" />
+                        <path d="M17 17H4" />
+                        <path d="M9 13L4 17L9 21" />
+                    </svg>
+                </span><span>Transactions</span>
+            </button>
+            <button class="menu-btn" data-section="reconciliation" onclick="showSection('reconciliation')">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 3L19 6V11C19 15.4 16.2 19.4 12 21C7.8 19.4 5 15.4 5 11V6L12 3Z" />
+                        <path d="M9 12L11 14L15 10" />
+                    </svg>
+                </span><span>Reconciliation</span>
+            </button>
+            <button class="menu-btn" data-section="logs" onclick="showSection('logs')">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M7 3H14L19 8V21H7V3Z" />
+                        <path d="M14 3V8H19" />
+                        <path d="M10 13H16" />
+                        <path d="M10 17H16" />
+                    </svg>
+                </span><span>Settlement Logs</span>
+            </button>
+            <button class="menu-btn menu-action" id="triggerSettlementBtn" onclick="triggerSettlement()">
+                <span class="menu-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M10 8L16 12L10 16V8Z" />
+                    </svg>
+                </span><span>Trigger Settlement</span>
+            </button>
+        </nav>
+
+        <button id="logoutBtn" class="menu-btn logout" onclick="logout()" aria-label="Logout" title="Logout">
+            <svg class="logout-symbol" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M17 16L21 12L17 8M21 12H9M13 4H7C5.89543 4 5 4.89543 5 6V18C5 19.1046 5.89543 20 7 20H13" />
+            </svg>
+        </button>
+    </aside>
+
+    <main class="main">
+        <div class="topbar">
+            <h1 id="sectionTitle">System Overview</h1>
+            <p id="lastUpdated"></p>
+        </div>
 
         <!-- DASHBOARD -->
-        <div id="dashboard" class="section">
-            <h1>System Overview</h1>
+        <section id="dashboard" class="section" data-title="System Overview">
             <p class="subtitle">Settlement job runs automatically every 30 seconds.</p>
-            <p id="lastUpdated"></p>
 
             <div class="cards">
                 <div class="card" id="totalCard"></div>
@@ -39,70 +124,96 @@
                 <div class="card" id="retryCard"></div>
             </div>
 
-            <div id="settlementActivity" class="activity-box"></div>
-        </div>
+            <div class="panel">
+                <h2>System Status Indicators</h2>
+                <div id="settlementActivity" class="activity-box"></div>
+            </div>
+        </section>
 
         <!-- CUSTOMERS -->
-        <div id="customers" class="section hidden">
-            <h1>Customers</h1>
+        <section id="customers" class="section hidden" data-title="Customers">
+            <p class="subtitle">Manage customer records used during transaction settlement.</p>
+            <div class="panel">
+                <div class="form" id="customerForm">
+                    <input type="text" id="customerName" placeholder="Name">
+                    <input type="email" id="customerEmail" placeholder="Email">
+                    <button onclick="createCustomer()">Create</button>
+                </div>
 
-            <div class="form" id="customerForm">
-                <input type="text" id="customerName" placeholder="Name">
-                <input type="email" id="customerEmail" placeholder="Email">
-                <button onclick="createCustomer()">Create</button>
+                <div class="table-wrap">
+                    <table id="customersTable"></table>
+                </div>
+                <div class="pagination" id="customersPagination"></div>
             </div>
-
-            <table id="customersTable"></table>
-        </div>
+        </section>
 
         <!-- MERCHANTS -->
-        <div id="merchants" class="section hidden">
-            <h1>Merchants</h1>
+        <section id="merchants" class="section hidden" data-title="Merchants">
+            <p class="subtitle">Configure merchant settlement accounts and payout cycles.</p>
+            <div class="panel">
+                <div class="form" id="merchantForm">
+                    <input type="text" id="merchantName" placeholder="Name">
+                    <input type="text" id="merchantBank" placeholder="Bank Account">
+                    <select id="merchantCycle" aria-label="Settlement Cycle">
+                        <option value="DAILY" selected>Daily</option>
+                        <option value="WEEKLY">Weekly</option>
+                    </select>
+                    <button onclick="createMerchant()">Create</button>
+                </div>
 
-            <div class="form" id="merchantForm">
-                <input type="text" id="merchantName" placeholder="Name">
-                <input type="text" id="merchantBank" placeholder="Bank Account">
-                <input type="text" id="merchantCycle" placeholder="Settlement Cycle (DAILY)">
-                <button onclick="createMerchant()">Create</button>
+                <div class="table-wrap">
+                    <table id="merchantsTable"></table>
+                </div>
+                <div class="pagination" id="merchantsPagination"></div>
             </div>
-
-            <table id="merchantsTable"></table>
-        </div>
+        </section>
 
         <!-- TRANSACTIONS -->
-        <div id="transactions" class="section hidden">
-            <h1>Transactions</h1>
+        <section id="transactions" class="section hidden" data-title="Transactions">
+            <p class="subtitle">Capture and monitor transaction lifecycle progression.</p>
+            <div class="panel">
+                <div class="form" id="transactionForm">
+                    <input type="number" id="customerId" placeholder="Customer ID">
+                    <input type="number" id="merchantId" placeholder="Merchant ID">
+                    <input type="number" id="amount" placeholder="Amount">
+                    <button onclick="createTransaction()">Create</button>
+                </div>
 
-            <div class="form" id="transactionForm">
-                <input type="number" id="customerId" placeholder="Customer ID">
-                <input type="number" id="merchantId" placeholder="Merchant ID">
-                <input type="number" id="amount" placeholder="Amount">
-                <button onclick="createTransaction()">Create</button>
+                <div class="table-wrap">
+                    <table id="transactionsTable"></table>
+                </div>
+                <div class="pagination" id="transactionsPagination"></div>
             </div>
-
-            <table id="transactionsTable"></table>
-        </div>
+        </section>
 
         <!-- RECONCILIATION -->
-        <div id="reconciliation" class="section hidden">
-            <h1>Reconciliation & Exceptions</h1>
+        <section id="reconciliation" class="section hidden" data-title="Reconciliation & Exceptions">
+            <p class="subtitle">Process reconciliation mismatches and clear exception queue items.</p>
+            <div class="panel">
+                <div class="form" id="reconciliationControls">
+                    <button onclick="runReconciliation()">Run Reconciliation</button>
+                </div>
 
-            <div class="form" id="reconciliationControls">
-                <button onclick="runReconciliation()">Run Reconciliation</button>
+                <div class="table-wrap">
+                    <table id="exceptionsTable"></table>
+                </div>
+                <div class="pagination" id="exceptionsPagination"></div>
             </div>
-
-            <table id="exceptionsTable"></table>
-        </div>
+        </section>
 
         <!-- LOGS -->
-        <div id="logs" class="section hidden">
-            <h1>Settlement Logs</h1>
-            <table id="logsTable"></table>
-        </div>
-
-    </div>
+        <section id="logs" class="section hidden" data-title="Settlement Logs">
+            <p class="subtitle">Audit settlement execution results and retry outcomes.</p>
+            <div class="panel">
+                <div class="table-wrap">
+                    <table id="logsTable"></table>
+                </div>
+                <div class="pagination" id="logsPagination"></div>
+            </div>
+        </section>
+    </main>
 </div>
 
-<script src="app.js?v=3"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>
