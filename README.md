@@ -9,6 +9,30 @@ The project demonstrates the full lifecycle of customer/merchant transactions wi
 - reconciliation and exception handling
 - role-based access (admin and user)
 
+## Why This Project Exists
+
+Most demos show payment status updates. This one focuses on **operational correctness under contention and retries**:
+- What happens when scheduler and manual trigger collide?
+- What happens when the same trigger request is retried?
+- What happens when settlement keeps failing for a transaction?
+- How do operators see and resolve exceptions safely?
+
+The implementation emphasizes these questions as first-class design concerns.
+
+## Quick Navigation
+
+- [Live Demo](#live-demo)
+- [UI Preview](#ui-preview)
+- [Engineering Invariants](#engineering-invariants)
+- [System Architecture](#system-architecture)
+- [Core Execution Flows](#core-execution-flows)
+- [Data Model](#data-model)
+- [Design Decisions and Rationale](#design-decisions-and-rationale)
+- [Failure Modes and Handling](#failure-modes-and-handling)
+- [API Summary](#api-summary)
+- [Local Development](#local-development)
+- [Deployment (Railway)](#deployment-railway)
+
 ## Live Demo
 
 - **URL:** https://settlement-engine-production.up.railway.app
@@ -44,14 +68,20 @@ Admin credentials are intentionally private.
 |---|
 | ![Settlement Logs](docs/screenshots/ui-logs.png) |
 
-## What This System Guarantees
+## Engineering Invariants
 
-- **Single settlement runner at a time** using Redis distributed lock coordination.
-- **Safe retries for manual trigger** using idempotency-key semantics.
-- **Deterministic transaction progression** with bounded retry and terminal failure behavior.
-- **Clear exception lifecycle** through reconciliation queue, retry, and resolve flows.
-- **Backend-enforced role policy** even if UI is tampered with.
-- **Operational visibility** via lock/run telemetry and status dashboards.
+- **At-most-one active settlement executor**
+  - Redis lock ensures scheduler/manual triggers never run settlement concurrently.
+- **Idempotent manual trigger semantics**
+  - Duplicate trigger requests with the same key resolve to one execution outcome (within the same app instance and TTL window).
+- **Deterministic transaction lifecycle**
+  - `CAPTURED -> PROCESSING -> SETTLED | FAILED`, with bounded retries.
+- **Explicit exception operations**
+  - Failures crossing retry limit are queued for reconciliation actions (`retry` / `resolve`).
+- **Server-side authorization as source of truth**
+  - RBAC is enforced on backend endpoints regardless of UI behavior.
+- **Auditable runtime state**
+  - Lock lifecycle, run source, counts, and settlement logs are queryable in UI/API.
 
 ## Tech Stack
 
@@ -66,20 +96,189 @@ Admin credentials are intentionally private.
 - Maven
 - Playwright (validation scripts)
 
-## Architecture
+## System Architecture
 
-```text
-Browser UI (static pages)
-    |
-Spring Boot REST + Security
-    |
-+------------------------+------------------------+
-| Settlement Core        | Reconciliation Service |
-| (lock + idempotency)   | (exceptions + actions) |
-+------------------------+------------------------+
-    |
-PostgreSQL (state/logs) + Redis (lock/idempotency)
+```mermaid
+flowchart LR
+    UI[Browser UI<br/>HTML / CSS / Vanilla JS] --> API[Spring Boot API + Security]
+    API --> EXEC[Settlement Execution Service]
+    API --> RECON[Reconciliation Service]
+    API --> MON[Monitoring Service]
+    EXEC --> DB[(PostgreSQL)]
+    EXEC --> REDIS[(Redis)]
+    RECON --> DB
+    MON --> DB
+    MON --> REDIS
+    SCHED[Quartz Scheduler<br/>Every 30s] --> EXEC
 ```
+
+## Core Execution Flows
+
+### Settlement Trigger Sequence
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant UI as Dashboard UI
+    participant API as SettlementController
+    participant IDEMP as Idempotency Service
+    participant LOCK as Redis Lock
+    participant EXEC as Settlement Service
+    participant DB as PostgreSQL
+
+    Admin->>UI: Click "Trigger Settlement"
+    UI->>API: POST /settlement/trigger (Idempotency-Key)
+    API->>IDEMP: execute(key, action)
+
+    alt Existing completed key
+        IDEMP-->>API: replay cached response
+        API-->>UI: 200 (replayed=true)
+    else New key / no key
+        IDEMP->>LOCK: try acquire lock
+        alt Lock acquired
+            LOCK-->>IDEMP: acquired
+            IDEMP->>EXEC: processSettlements(MANUAL_TRIGGER)
+            EXEC->>DB: fetch CAPTURED transactions
+            loop each transaction
+                EXEC->>DB: CAPTURED -> PROCESSING
+                alt Settlement success
+                    EXEC->>DB: PROCESSING -> SETTLED
+                else Failed but retry remaining
+                    EXEC->>DB: retryCount++ and back to CAPTURED
+                else Max retries reached
+                    EXEC->>DB: PROCESSING -> FAILED
+                end
+                EXEC->>DB: insert SettlementLog
+            end
+            EXEC->>DB: reconcile pending transactions
+            EXEC->>DB: FAILED -> EXCEPTION_QUEUED (reconciliation rule)
+            IDEMP->>LOCK: release lock (finally)
+            IDEMP-->>API: final response
+            API-->>UI: 200
+        else Lock not acquired
+            LOCK-->>IDEMP: already held
+            IDEMP-->>API: safe no-op response
+            API-->>UI: 200 (already running)
+        end
+    end
+```
+
+### Lock Acquisition Flow
+
+```mermaid
+flowchart TD
+    A[Trigger arrives: scheduler/manual] --> B[Attempt Redis lock acquisition]
+    B -->|Lock unavailable| C[Record lock skipped in monitoring]
+    C --> D[Return safe no-op result]
+    B -->|Lock acquired| E[Record lock acquired metadata]
+    E --> F[Run settlement processing]
+    F --> G[Record run metrics / counts]
+    G --> H[Release lock in finally]
+    H --> I[Record lock released metadata]
+```
+
+### Retry and Exception Flow
+
+```mermaid
+flowchart LR
+    A[CAPTURED] --> B[PROCESSING]
+    B -->|Success| C[SETTLED]
+    B -->|Failure| D{retryCount < maxRetries?}
+    D -->|Yes| E[retryCount++]
+    E --> A
+    D -->|No| F[FAILED]
+    F --> G[Reconciliation pass]
+    G --> H[reconciliationStatus = EXCEPTION_QUEUED]
+    H --> I[Operator actions: retry / resolve]
+```
+
+### Idempotency Strategy (Manual Trigger)
+
+This system applies idempotency specifically to `POST /settlement/trigger` to make manual operations safe under retries and repeated clicks.
+The idempotency cache is maintained in-memory inside the running application process.
+
+- With no `Idempotency-Key`, the trigger executes normally.
+- With a key:
+  - First request executes and stores response for a TTL window.
+  - Concurrent duplicate requests with the same key wait for the in-flight result (up to configured timeout).
+  - Subsequent duplicates replay the same stored response instead of re-running settlement.
+- Scope note: this behavior is guaranteed per app instance (not a distributed shared idempotency store).
+- This avoids duplicate operational side effects while keeping API behavior deterministic for clients.
+
+## Data Model
+
+```mermaid
+erDiagram
+    CUSTOMER ||--o{ TRANSACTION : owns
+    MERCHANT ||--o{ TRANSACTION : receives
+    TRANSACTION ||--o{ SETTLEMENT_LOG : emits
+
+    CUSTOMER {
+      bigint id PK
+      string name
+      string email UK
+      datetime created_at
+    }
+
+    MERCHANT {
+      bigint id PK
+      string name
+      string bank_account
+      string settlement_cycle
+      datetime created_at
+    }
+
+    TRANSACTION {
+      bigint id PK
+      decimal amount
+      string status
+      string reconciliation_status
+      int retry_count
+      int max_retries
+      datetime created_at
+      datetime settled_at
+      datetime reconciliation_updated_at
+      string exception_reason
+      bigint customer_id FK
+      bigint merchant_id FK
+    }
+
+    SETTLEMENT_LOG {
+      bigint id PK
+      int attempt_number
+      string result
+      string message
+      datetime timestamp
+      bigint transaction_id FK
+    }
+```
+
+## Design Decisions and Rationale
+
+| Decision | Why it was chosen | What it prevents |
+|---|---|---|
+| Redis distributed lock for settlement execution | Scheduler and manual trigger can overlap in real systems; lock enforces single active runner | Double-processing and inconsistent state transitions |
+| In-memory idempotency for manual trigger endpoint | Operators and clients can retry requests; response replay gives deterministic behavior per app instance | Duplicate side-effects from repeated trigger calls within the same instance |
+| Explicit `CAPTURED -> PROCESSING` claim before outcome | Makes ownership and in-flight state visible and auditable | Ambiguous transaction ownership during execution |
+| Bounded retry with terminal `FAILED` + exception queue | Distinguishes transient failures from cases requiring operator action | Infinite retry loops and silent failure accumulation |
+| Reconciliation modeled as explicit workflow | Keeps mismatch handling observable and controlled by ops actions | Hidden data integrity drift over time |
+| Backend-enforced RBAC (UI is secondary) | Security policy must hold even if frontend is bypassed | Privilege escalation through client-side manipulation |
+
+## Failure Modes and Handling
+
+| Failure Mode | Expected Behavior | Why this is acceptable |
+|---|---|---|
+| Trigger arrives while another run is active | Lock acquisition fails; request returns safe no-op/already-running response | Preserves single-writer safety over throughput |
+| Duplicate manual trigger with same `Idempotency-Key` | Existing/in-flight result is replayed rather than re-executed | Prevents duplicate side-effects on retries |
+| Settlement attempt fails but retries remain | Transaction returns to `CAPTURED`, `retryCount` increments | Allows transient recovery without manual intervention |
+| Settlement fails after max retries | Transaction moves to `FAILED`, then reconciliation marks it `EXCEPTION_QUEUED` | Escalates to controlled operator workflow |
+| Unauthorized write attempt from USER role | Backend returns `403` | Security does not depend on frontend controls |
+
+## Scope and Non-Goals
+
+- This project models **settlement orchestration behavior**, not external processor integrations.
+- It does not implement payment gateway protocols or bank file formats.
+- It prioritizes **correctness and observability** over horizontal scale optimization.
 
 ## Roles and Access
 
