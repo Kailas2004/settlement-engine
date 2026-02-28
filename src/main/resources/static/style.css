@@ -500,7 +500,7 @@ table {
 th,
 td {
     padding: 12px 10px;
-    text-align: left;
+    text-align: center;
     border-bottom: 1px solid #edf2fa;
     font-size: 13px;
     line-height: 1.4;
@@ -557,7 +557,6 @@ tr:hover td {
 #logsTable th:nth-child(3),
 #logsTable td:nth-child(3) {
     font-variant-numeric: tabular-nums;
-    text-align: right;
 }
 
 td button {
